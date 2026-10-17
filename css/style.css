@@ -488,6 +488,8 @@ kbd { background: #eee; border: 1px solid #bbb; border-radius: 4px; padding: 0 4
   .brand { display: none; }
   #center { gap: 2cqw; padding: 1.5cqw; justify-content: flex-start; }
   .tok { width: 4cqw; height: 4cqw; font-size: 2.4cqw; }
+  #dice { gap: 3cqw; }
+  .die { width: 12cqw; height: 12cqw; }
   .prompt-card { font-size: 0.9em; }
 }
 
