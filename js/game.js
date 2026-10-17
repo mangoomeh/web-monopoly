@@ -458,7 +458,7 @@ async function drawCard(p, deck, diceTotal) {
   if (card.action === "jailFree") p.jailCards.push(deck);
   else S.decks[deck].push(idx);
   log(`${p.name} drew ${deck === "chance" ? "Chance" : "Community Chest"}: “${card.text}”`, p);
-  await showInfo(p, cardHtml(deck, card.text));
+  await showInfo(p, cardHtml(deck, card.text), true);
 
   switch (card.action) {
     case "money":
@@ -741,9 +741,11 @@ function cpuTradeGain(p, other, give, get, cashToP) {
 
 // ---------------------------------------------------------------- UI: prompts, modals, toasts
 
-function ask(p, html, actions, card = "") {
+// `timeout` (ms) auto-picks the first action, e.g. to move on from a card.
+function ask(p, html, actions, card = "", timeout = 0) {
   return new Promise((resolve) => {
-    pending = { p, html, actions, card, resolve };
+    pending = { p, html, actions, card, resolve, timeout };
+    if (timeout) pending.timer = setTimeout(() => choose(0), timeout);
     render();
   });
 }
@@ -753,17 +755,20 @@ function choose(k) {
   const a = pending.actions[k];
   if (!a || (typeof a.disabled === "function" ? a.disabled() : a.disabled)) return;
   const r = pending.resolve;
+  clearTimeout(pending.timer);
   pending = null;
   r(a.value);
   render();
 }
 
-async function showInfo(p, html) {
-  if (p.cpu) {
+// Tell a player what happened. Humans get an OK button only when `ack` is set
+// (cards), and even then the game moves on by itself after a few seconds.
+async function showInfo(p, html, ack = false) {
+  if (p.cpu || !ack) {
     setStatus(html);
-    await sleep(1400);
+    await sleep(p.cpu ? 1400 : 1100);
   } else {
-    await ask(p, "", [{ label: "OK", value: true, primary: true }], html);
+    await ask(p, "", [{ label: "OK", value: true, primary: true }], html, 5000);
   }
 }
 
@@ -986,6 +991,7 @@ function buildBoard() {
     el.innerHTML = `
       ${b.group ? `<div class="bar" style="background:${GROUPS[b.group].color}"><div class="buildings"></div></div>` : ""}
       <div class="tname">${esc(b.name)}</div>
+      ${SHORT_NAMES[i] ? `<div class="tshort">${esc(SHORT_NAMES[i])}</div>` : ""}
       ${b.icon ? `<div class="ticon">${b.icon}</div>` : ""}
       ${b.price ? `<div class="tprice">${fmt(b.price)}</div>` : b.amount ? `<div class="tprice">Pay ${fmt(b.amount)}</div>` : ""}
       ${i === 0 ? '<div class="tprice">Collect £200</div>' : ""}
@@ -1025,6 +1031,7 @@ function renderTokens() {
     if (p.bankrupt) continue;
     const tile = document.querySelector(`#board .tile[data-i="${p.pos}"] .tokens`);
     const cur = p.id === S.turn ? "current" : "";
+    tile.classList.toggle("crowd", tile.children.length >= 2);
     tile.insertAdjacentHTML("beforeend", `<span class="tok ${cur} ${p.inJail ? "jailed" : ""}" style="--c:${p.color}" title="${esc(p.name)}">${p.token}</span>`);
   }
 }
@@ -1050,7 +1057,8 @@ function renderPrompt() {
       ${pending.html ? `<div class="prompt-msg">${pending.html}</div>` : ""}
       <div class="prompt-actions">${pending.actions.map((a, k) => {
         const dis = typeof a.disabled === "function" ? a.disabled() : a.disabled;
-        return `<button data-k="${k}" class="${a.primary ? "primary" : ""} ${a.danger ? "danger" : ""}" ${dis ? "disabled" : ""}>${a.label}</button>`;
+        const auto = pending.timeout && k === 0 ? `auto" style="--t:${pending.timeout}ms` : "";
+        return `<button data-k="${k}" class="${a.primary ? "primary" : ""} ${a.danger ? "danger" : ""} ${auto}" ${dis ? "disabled" : ""}>${a.label}</button>`;
       }).join("")}</div>`;
   } else {
     el.innerHTML = `<div class="prompt-msg">${S.status || ""}</div>`;
@@ -1070,8 +1078,10 @@ function renderDice() {
 function renderLog() {
   const el = $("#log");
   if (!el || !S) return;
-  el.innerHTML = S.log.slice(-80).map((l) => `<li class="${l.strong ? "strong" : ""}" style="${l.c ? `--c:${l.c}` : ""}">${esc(l.msg)}</li>`).join("");
+  const items = (list) => list.map((l) => `<li class="${l.strong ? "strong" : ""}" style="${l.c ? `--c:${l.c}` : ""}">${esc(l.msg)}</li>`).join("");
+  el.innerHTML = items(S.log.slice(-80));
   el.scrollTop = el.scrollHeight;
+  $("#ticker").innerHTML = items(S.log.slice(-4));
 }
 
 // ---------------------------------------------------------------- setup screen
@@ -1155,8 +1165,18 @@ function startGame(state, fresh) {
 
 // ---------------------------------------------------------------- boot
 
+// Phones: controls live in a dock under the board that sticks to the bottom of the screen.
+const phoneLayout = window.matchMedia("(max-width: 860px)");
+function placeControls() {
+  const controls = [$("#prompt"), $("#tools")];
+  if (phoneLayout.matches) $("#dock").append(...controls);
+  else controls.forEach((el) => $("#center").insertBefore(el, $("#pot")));
+}
+
 function init() {
   buildBoard();
+  placeControls();
+  phoneLayout.addEventListener("change", placeControls);
   $("#prompt").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-k]");
     if (b) choose(+b.dataset.k);
