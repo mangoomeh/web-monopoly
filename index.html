@@ -2,36 +2,75 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Monopoly</title>
-    <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css" />
+    <meta name="description" content="Play Monopoly in your browser — pass-and-play with friends or against CPU opponents." />
+    <meta name="theme-color" content="#0f3d2e" />
+    <title>Web Monopoly</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎩</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css" />
   </head>
   <body>
-    <img id="logo" src="./images/logo.png">
-    <div id="container">
-      <div id="gameWindow">
-        <div id="board"></div>
-        <div id="screen">
-          <div id="settings">
-            <h3>Number of Players:</h3>
-            <form>
-              <input type="radio" name="numOfPlayers" value="2" />2
-              <input type="radio" name="numOfPlayers" value="3" />3
-              <input type="radio" name="numOfPlayers" value="4" />4
-            </form>
-            <button id="newGame">NEW GAME</button>
-            <div id="warningMessage"></div>
+    <main id="app">
+      <section id="board-wrap">
+        <div id="board">
+          <div id="center">
+            <div class="brand">WEB<br />MONOPOLY</div>
+            <div id="dice" aria-label="Dice"></div>
+            <div id="prompt" aria-live="polite"></div>
+            <div id="tools" hidden>
+              <span id="tools-who"></span>
+              <button id="btn-manage" class="ghost">🏗️ Manage</button>
+              <button id="btn-trade" class="ghost">🤝 Trade</button>
+            </div>
+            <div id="pot"></div>
           </div>
         </div>
-      </div>
-      <div id="infoWindow">
-        <div id="playerInfo"></div>
-      </div>
-    </div>
+      </section>
 
-    <script src="data.js"></script>
-    <script src="script.js"></script>
+      <aside id="side">
+        <div id="players"></div>
+        <div class="log-wrap">
+          <div class="log-head"><h3>Game log</h3><span id="round"></span></div>
+          <ul id="log"></ul>
+        </div>
+        <div id="menu">
+          <label>Speed
+            <select id="speed">
+              <option value="slow">Slow</option>
+              <option value="normal">Normal</option>
+              <option value="fast">Fast</option>
+              <option value="instant">Instant</option>
+            </select>
+          </label>
+          <button id="btn-rules" class="ghost">Rules</button>
+          <button id="btn-end" class="ghost">End game</button>
+          <button id="btn-new" class="ghost">New game</button>
+        </div>
+      </aside>
+    </main>
+
+    <div id="modal" hidden></div>
+    <div id="toast" role="status"></div>
+
+    <template id="rules-tpl">
+      <ul class="rules">
+        <li>Everyone starts with the chosen cash. Roll the dice and move round the board; passing <b>GO</b> pays £200.</li>
+        <li>Land on unowned property to buy it. If you pass, it goes to <b>auction</b> (when enabled).</li>
+        <li>Landing on someone else's property costs rent. Owning a whole colour set doubles rent on undeveloped sites.</li>
+        <li>With a full set (none mortgaged) you can build houses evenly, then hotels, via <b>Manage</b>.</li>
+        <li>Rolling doubles gives another roll — but three doubles in a row sends you to Jail.</li>
+        <li>In Jail: roll doubles, pay £50 or use a Get Out of Jail Free card. After three failed rolls you must pay.</li>
+        <li>Short of cash? Sell buildings (half price) or mortgage property (half its price, 10% interest to repay).</li>
+        <li>Use <b>Trade</b> to swap property and cash with other players. CPUs judge offers on their merits.</li>
+        <li>If you can't pay a debt you're bankrupt. The last player standing wins.</li>
+        <li>The game saves automatically at the end of every turn. <kbd>Enter</kbd> triggers the highlighted button.</li>
+      </ul>
+    </template>
+
+    <script src="js/data.js"></script>
+    <script src="js/game.js"></script>
   </body>
 </html>
