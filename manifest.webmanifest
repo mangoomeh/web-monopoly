@@ -1,0 +1,21 @@
+{
+  "name": "Web Monopoly",
+  "short_name": "Monopoly",
+  "description": "Play Monopoly in your browser — pass-and-play with friends or against CPU opponents.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f3d2e",
+  "theme_color": "#0f3d2e",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "snippet.png", "sizes": "1400x900", "type": "image/png", "form_factor": "wide", "label": "A game in progress" }
+  ]
+}

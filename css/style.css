@@ -53,7 +53,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 #app {
   display: flex;
   gap: 18px;
-  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   justify-content: center;
   align-items: flex-start;
 }
@@ -75,7 +75,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 }
 
 @media (max-width: 860px) {
-  #app { flex-direction: column; align-items: center; padding: 8px; gap: 12px; }
+  #app {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
   #board-wrap { width: min(calc(100vw - 16px), 720px); min-width: 0; }
   #side { width: min(calc(100vw - 16px), 720px); max-height: none; }
 }

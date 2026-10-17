@@ -15,6 +15,7 @@ A complete, browser-based take on the classic property-trading board game (Londo
 - Animated tokens and dice, game log, title-deed cards (click any property)
 - Auto-saves to your browser at the end of every turn
 - Responsive: works on desktop and phones
+- Installable PWA: add it to your home screen / desktop and play offline
 
 ## Running locally
 Open `index.html` in a browser, or serve the folder:
@@ -27,6 +28,7 @@ python3 -m http.server
 - `css/style.css` – board and UI styling
 - `js/data.js` – board spaces, cards, rules constants
 - `js/game.js` – game engine, CPU logic and rendering
+- `manifest.webmanifest`, `sw.js`, `icons/` – PWA install & offline support (bump `CACHE` in `sw.js` when shipping changes)
 
 ## History
 Originally built as a project for GA SEI-33; rebuilt from the ground up as a full game.
