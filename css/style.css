@@ -53,7 +53,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 #app {
   display: flex;
   gap: 18px;
-  padding: 16px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   justify-content: center;
   align-items: flex-start;
 }
@@ -75,7 +75,42 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 }
 
 @media (max-width: 860px) {
-  #app { flex-direction: column; align-items: center; padding: 8px; gap: 12px; }
+  #dock {
+    position: sticky;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 5;
+    width: min(calc(100vw - 16px), 720px);
+    background: var(--panel);
+    border-radius: 14px;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.35), 0 0 0 3px var(--gold);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+    font-size: 15px;
+  }
+  #dock #prompt { max-width: 100%; width: 100%; }
+  #dock .prompt-actions button { min-height: 44px; flex: 1 1 auto; }
+  #dock .prompt-card { width: 100%; max-width: 360px; }
+  #dock .deed { font-size: 0.82em; }
+  #dock .deed td { padding: 0 4px; }
+  #dock .deed tbody { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; }
+  #dock .deed tr { display: flex; justify-content: space-between; }
+  #dock .deed-head { padding: 0.3em; }
+  #dock .deed-head .small { display: none; }
+  #dock .deed-icon { font-size: 1.3em; }
+  #dock #tools button { min-height: 40px; }
+  #dock .prompt-msg:empty { display: none; }
+
+
+  #app {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
   #board-wrap { width: min(calc(100vw - 16px), 720px); min-width: 0; }
   #side { width: min(calc(100vw - 16px), 720px); max-height: none; }
 }
@@ -148,6 +183,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
   font-size: 0.95cqw;
   overflow-wrap: anywhere;
 }
+.tshort { display: none; }
 .ticon { font-size: 2.6cqw; line-height: 1; margin: auto 0; }
 .tprice { margin-top: auto; padding-block-end: 0.9cqw; font-size: 0.95cqw; color: #333; }
 
@@ -190,7 +226,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 .side-top .tokens, .side-right .tokens { transform: rotate(180deg); }
 .side-left .tokens, .side-right .tokens { inset: 0 22% 0 0; }
 .side-right .tokens { inset: 0 0 0 22%; }
-.corner .tokens { inset: 0; align-content: flex-end; padding-bottom: 0.8cqw; }
+.corner .tokens { inset: auto 0 0 0; height: 42%; align-content: center; background: rgba(241, 236, 217, 0.85); }
+.corner .tokens:empty { display: none; }
 
 .tok {
   display: inline-grid;
@@ -208,6 +245,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
   flex: none;
 }
 #board .tok { min-width: 0; min-height: 0; }
+#board .tokens.crowd .tok { width: 2.2cqw; height: 2.2cqw; font-size: 1.25cqw; border-width: 0.25cqw; }
+.corner .tokens.crowd { gap: 0; }
 .tok.current { animation: bob 1s ease-in-out infinite; z-index: 2; }
 .tok.jailed { filter: grayscale(0.6); }
 @keyframes bob { 50% { transform: translateY(-0.5cqw); } }
@@ -271,6 +310,23 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 #tools[hidden] { display: none; }
 #tools .tok { width: 28px; height: 28px; font-size: 16px; border-width: 3px; }
 #pot { font-weight: 700; color: #0b6b2f; }
+#ticker { display: none; }
+#dock:empty { display: none; }
+
+/* OK button that will continue on its own: a bar drains across it. */
+button.auto { position: relative; overflow: hidden; }
+button.auto::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.8);
+  transform-origin: left;
+  animation: drain var(--t) linear forwards;
+}
+@keyframes drain { to { transform: scaleX(0); } }
 #pot:empty { display: none; }
 
 /* ---------------------------------------------------------- cards */
@@ -478,12 +534,65 @@ kbd { background: #eee; border: 1px solid #bbb; border-radius: 4px; padding: 0 4
 @container (max-width: 560px) {
   .tile .tname { display: none; }
   .tile.corner .tname { display: block; font-size: 1.9cqw; }
+  .tshort {
+    display: block;
+    font-size: 1.75cqw;
+    font-weight: 700;
+    line-height: 1.1;
+    padding: 0.6cqw 0.2cqw 0;
+    hyphens: manual;
+  }
+  .corner .tprice { display: none; }
+  .corner .tshort { display: none; }
+  .tile:not(.corner) .ticon { display: none; }
+  /* Everything reads the same way up: top row upright, both side columns top-to-bottom. */
+  .tile.side-top { transform: none; flex-direction: column-reverse; }
+  .tile.side-top .bar { border-block-end: 0; border-block-start: 0.15cqw solid var(--line); }
+  .tile.side-top .tprice { margin-top: 0; margin-bottom: auto; padding-block: 1.2cqw 0; }
+  .tile.side-top .owner-strip, .tile.side-right .owner-strip { inset-block-end: auto; inset-block-start: 0; }
+  .tile.side-right { transform: none; flex-direction: column-reverse; }
+  .tile.side-right .bar { border-block-end: 0; border-block-start: 0.15cqw solid var(--line); }
+  .tile.side-right .tprice { margin-top: 0; margin-bottom: auto; padding-block: 1.2cqw 0; }
+  .side-top .tokens, .side-right .tokens { transform: none; }
+  .side-top .tokens { inset: 0.7cqw 0 22% 0; }
   .tprice { font-size: 1.9cqw; padding-block-end: 1.2cqw; }
   .ticon { font-size: 3.4cqw; }
   .brand { display: none; }
-  #center { gap: 2cqw; padding: 1.5cqw; justify-content: flex-start; }
+  #center { gap: 3cqw; padding: 3cqw; justify-content: center; }
+  #ticker {
+    display: block;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    font-size: clamp(11px, 3.1cqw, 14px);
+    text-align: left;
+    line-height: 1.35;
+  }
+  #ticker li { padding: 2px 0 2px 8px; border-left: 3px solid var(--c, transparent); margin-bottom: 3px; }
+  #ticker li:last-child { font-weight: 700; }
+  #ticker li.strong { font-weight: 700; }
   .tok { width: 4cqw; height: 4cqw; font-size: 2.4cqw; }
+  #dice { gap: 4cqw; }
+  .die { width: 15cqw; height: 15cqw; }
   .prompt-card { font-size: 0.9em; }
+}
+
+/* Phones: compact player list, toasts at the top so they don't cover the controls.
+   (Kept at the end so it overrides the base panel styles.) */
+@media (max-width: 860px) {
+  #players { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .player { padding: 7px 9px; border-left-width: 4px; }
+  .phead { gap: 6px; }
+  .phead .tok { width: 24px; height: 24px; font-size: 13px; border-width: 2px; }
+  .pname { font-size: 0.9em; }
+  .pname small { display: none; }
+  .pcash { font-size: 0.95em; }
+  .pmeta, .pprops { margin-left: 0; }
+  .pmeta { font-size: 0.72em; }
+  .chip { width: 16px; height: 16px; font-size: 9px; }
+  #toast { top: max(12px, env(safe-area-inset-top)); bottom: auto; transform: translate(-50%, -30px); }
+  #toast.show { transform: translate(-50%, 0); }
 }
 
 @media (prefers-reduced-motion: reduce) {

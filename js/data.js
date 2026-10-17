@@ -99,6 +99,14 @@ const CHEST_CARDS = [
   { text: "You inherit £100.", action: "money", amount: 100 },
 ];
 
+// Compact labels for tiles on small screens.
+const SHORT_NAMES = {
+  1: "Old Kent", 2: "Chest", 3: "White\u00ADchapel", 4: "Tax", 5: "King's X", 6: "Angel", 7: "Chance", 8: "Euston", 9: "Penton\u00ADville",
+  11: "Pall Mall", 12: "Elec\u00ADtric", 13: "White\u00ADhall", 14: "N'land Ave", 15: "Mary\u00ADlebone", 16: "Bow St", 17: "Chest", 18: "Marl\u00ADboro'", 19: "Vine St",
+  21: "Strand", 22: "Chance", 23: "Fleet St", 24: "Trafal\u00ADgar", 25: "Fen\u00ADchurch", 26: "Leices\u00ADter", 27: "Coven\u00ADtry", 28: "Water", 29: "Picca\u00ADdilly",
+  31: "Regent St", 32: "Oxford St", 33: "Chest", 34: "Bond St", 35: "L'pool St", 36: "Chance", 37: "Park Lane", 38: "Super Tax", 39: "Mayfair",
+};
+
 const TOKENS = ["🎩", "🚗", "🐶", "🚢", "👢", "🐱", "🦖", "🦆"];
 const PLAYER_COLORS = ["#e53935", "#1e88e5", "#43a047", "#fdd835", "#8e24aa", "#fb8c00"];
 const DEFAULT_NAMES = ["Player", "Ada", "Brunel", "Churchill", "Darwin", "Eliot"];
