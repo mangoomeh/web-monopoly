@@ -1,14 +1,32 @@
 # Web Monopoly
-Web Monopoly is based off the original game [Wikipedia: Monopoly(game)](https://en.wikipedia.org/wiki/Monopoly_(game)). This game was created for one of the projects for GA SEI-33. This was an attempt to build a web application/game using HTML, CSS, DOM, and vanilla JavaScript. <br />
 
-![Monopoly Snippet](./snippet.png)
+A complete, browser-based take on the classic property-trading board game (London edition), written in plain HTML, CSS and JavaScript — no build step, no dependencies.
 
-## Setup
-The game can run on any modern web browsers. Open the .html file on the browser. A live version is available here: [Web Monopoly](https://mangoomeh.github.io/web-monopoly/)
+**Play it live: https://mangoomeh.github.io/web-monopoly/**
 
-## Project Status
-Completed. Might recreate using React.js / Angular.js
+![Web Monopoly](./snippet.png)
 
-## Trivia
-This game has been always a go-to among my friends and family. Recreating this game in a software version is something I have always thought about making, in hope to relive those moments.
+## Features
+- 2–6 players: pass-and-play humans and/or CPU opponents, each with their own token
+- Full rules: buying, rent (colour-set doubling, stations, utilities), houses & hotels with even building and a limited bank supply, mortgages (10% interest), Chance & Community Chest decks, Jail (doubles / £50 fine / Get Out of Jail Free cards, three-doubles rule), Income & Super Tax, bankruptcy
+- Auctions for unbought property (optional)
+- Trading property and cash between players; CPUs evaluate offers and make their own to complete colour sets
+- Optional Free Parking jackpot house rule, adjustable starting cash and CPU speed
+- Animated tokens and dice, game log, title-deed cards (click any property)
+- Auto-saves to your browser at the end of every turn
+- Responsive: works on desktop and phones
 
+## Running locally
+Open `index.html` in a browser, or serve the folder:
+```
+python3 -m http.server
+```
+
+## Project layout
+- `index.html` – page shell
+- `css/style.css` – board and UI styling
+- `js/data.js` – board spaces, cards, rules constants
+- `js/game.js` – game engine, CPU logic and rendering
+
+## History
+Originally built as a project for GA SEI-33; rebuilt from the ground up as a full game.
