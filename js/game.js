@@ -13,7 +13,14 @@ const shuffle = (arr) => {
   return arr;
 };
 const SPEEDS = { slow: 1.6, normal: 1, fast: 0.4, instant: 0.08 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms * SPEEDS[S.options.speed || "normal"]));
+// Once the game is over, pauses never end, so any CPU move still in flight stops where it is.
+const sleep = (ms) => new Promise((r) => S.over || setTimeout(r, ms * SPEEDS[S.options.speed || "normal"]));
+// Show what a CPU just did and hold it on screen long enough to read, even at instant speed.
+const announce = (html, ms = 1800) => {
+  setStatus(html);
+  render();
+  return new Promise((r) => S.over || setTimeout(r, Math.max(900, ms * SPEEDS[S.options.speed || "normal"])));
+};
 
 const CHANCE_JAIL_CARD = CHANCE_CARDS.findIndex((c) => c.action === "jailFree");
 const CHEST_JAIL_CARD = CHEST_CARDS.findIndex((c) => c.action === "jailFree");
@@ -28,7 +35,7 @@ let pending = null; // current question waiting for a human click
 function newState(setup) {
   return {
     players: setup.players.map((p, id) => ({
-      id, name: p.name, cpu: p.cpu, token: p.token, color: PLAYER_COLORS[id],
+      id, name: p.name, cpu: p.cpu, level: p.level || "normal", token: p.token, color: PLAYER_COLORS[id],
       cash: setup.options.startCash, pos: 0, inJail: false, jailTurns: 0, jailCards: [], bankrupt: false,
     })),
     tiles: BOARD.map(() => ({ owner: null, houses: 0, mortgaged: false })),
@@ -184,7 +191,9 @@ function unmortgage(p, i) {
 async function pay(p, amount, creditor, toPot = false) {
   if (amount <= 0) return true;
   if (p.cash < amount) {
+    const before = p.cash;
     const raised = p.cpu ? cpuRaiseFunds(p, amount) : await humanRaiseFunds(p, amount, creditor);
+    if (p.cpu && p.cash > before) await announce(`${p.token} <b>${esc(p.name)}</b> raised ${fmt(p.cash - before)} by mortgaging or selling houses to pay ${fmt(amount)}.`);
     if (!raised) {
       await goBankrupt(p, creditor);
       return false;
@@ -299,7 +308,7 @@ async function rollDice() {
 // ---------------------------------------------------------------- turn flow
 
 async function gameLoop() {
-  while (true) {
+  while (!S.over) {
     if (alive().length <= 1) return showWinner();
     const p = P(S.turn);
     if (!p.bankrupt) {
@@ -327,7 +336,7 @@ async function playTurn(p) {
   }
   while (true) {
     if (p.cpu) {
-      cpuManage(p);
+      await cpuManage(p);
       setStatus(`${p.token} <b>${esc(p.name)}</b> is rolling…`);
       await sleep(600);
     } else {
@@ -353,7 +362,7 @@ async function playTurn(p) {
 async function endTurn(p) {
   if (p.cpu) {
     await cpuTryTrade(p);
-    cpuManage(p);
+    await cpuManage(p);
     render();
     await sleep(700);
   } else {
@@ -368,7 +377,8 @@ async function jailTurn(p) {
   p.jailTurns++;
   let choice;
   if (p.cpu) {
-    const early = unownedCount() > 8;
+    // Hard CPUs know Jail is a safe place to wait once rivals have built.
+    const early = unownedCount() > 8 && !(p.level === "hard" && S.tiles.some((t) => t.houses && t.owner !== p.id));
     if (p.jailCards.length && early) choice = "card";
     else if (early && p.cash > 300) choice = "pay";
     else choice = "roll";
@@ -554,7 +564,7 @@ async function auction(i, starter) {
     if (q.cpu) {
       setStatus(`🔨 Auction: <b>${esc(b.name)}</b> — high bid ${fmt(high)}${leader ? ` (${esc(leader.name)})` : ""}. ${q.token} ${esc(q.name)} is thinking…`);
       await sleep(450);
-      const max = Math.min(cpuValue(q, i), q.cash - 40);
+      const max = level(q).smart ? smartPrice(q, i) : Math.min(cpuValue(q, i) * level(q).bid, q.cash - 40);
       if (high + 10 <= max) bid = high + (max - high > 60 && Math.random() < 0.5 ? 20 : 10);
     } else {
       const steps = [1, 10, 50, 100];
@@ -597,16 +607,41 @@ async function showWinner() {
   const w = ranked[0];
   log(`🏆 ${w.name} wins the game!`, w, true);
   setStatus(`🏆 <b>${esc(w.name)}</b> wins!`);
+  S.over = true;
   render();
-  await modal({
+  const results = `<ol class="standings">${ranked.map((p) => `<li><span class="tok" style="--c:${p.color}">${p.token}</span> ${esc(p.name)} <span>${p.bankrupt ? "bankrupt" : fmt(netWorth(p))}</span></li>`).join("")}</ol>`;
+  // Players can close the results to look over the final board and the game log.
+  let again = await modal({
     title: `🏆 ${esc(w.name)} wins!`,
-    html: `<ol class="standings">${ranked.map((p) => `<li><span class="tok" style="--c:${p.color}">${p.token}</span> ${esc(p.name)} <span>${p.bankrupt ? "bankrupt" : fmt(netWorth(p))}</span></li>`).join("")}</ol>`,
-    buttons: [{ label: "New game", value: true, primary: true }],
+    html: results,
+    buttons: [{ label: "View board & log", value: false }, { label: "New game", value: true, primary: true }],
   });
+  while (!again) {
+    again = (await ask({ cpu: true }, `🏆 <b>${esc(w.name)}</b> wins! The game is over.`, [
+      { label: "Results", value: "results" },
+      { label: "New game", value: "new", primary: true },
+    ])) === "new";
+    if (!again) {
+      again = await modal({ title: `🏆 ${esc(w.name)} wins!`, html: results, buttons: [{ label: "Close", value: false }, { label: "New game", value: true, primary: true }] });
+    }
+  }
   location.reload();
 }
 
 // ---------------------------------------------------------------- CPU logic
+
+// How difficulty changes a CPU's play. `rivals` scales how much it minds a trade
+// helping the other side; `reserve` scales the cash it holds back when buying and
+// building; `bid` scales how high it goes at auction; `accept` is the margin a
+// trade must give it; easy CPUs never start trades. Hard CPUs (`smart`) size
+// their cash reserve to the rent they could land on, price property by what it
+// does for their position and for rivals', and build where rent pays back best.
+const CPU_LEVELS = {
+  easy: { label: "Easy", rivals: 0.35, reserve: 2, bid: 0.75, accept: 0, noProposals: true },
+  normal: { label: "Normal", rivals: 1, reserve: 1, bid: 1, accept: 25 },
+  hard: { label: "Hard", rivals: 1.15, reserve: 1, bid: 1, accept: 40, smart: true },
+};
+const level = (p) => CPU_LEVELS[p.level] || CPU_LEVELS.normal;
 
 function cpuValue(p, i) {
   const b = BOARD[i];
@@ -623,11 +658,43 @@ function cpuValue(p, i) {
   return Math.round(v);
 }
 
+// Cash worth keeping back against the rent p could land on with its next roll.
+function dangerReserve(p) {
+  let expected = 0, worst = 0;
+  for (let roll = 2; roll <= 12; roll++) {
+    const i = (p.pos + roll) % 40, t = S.tiles[i];
+    if (!isBuyable(i) || t.owner === null || t.owner === p.id) continue;
+    const rent = rentFor(i, roll);
+    expected += rent * (6 - Math.abs(7 - roll)) / 36;
+    worst = Math.max(worst, rent);
+  }
+  return Math.max(60, expected * 2 + worst * 0.35);
+}
+
+// The most a smart CPU would pay for tile i: what it adds to p's position, plus
+// part of what it would add to the rival who'd gain most from it.
+function smartPrice(p, i) {
+  const before = S.tiles.map((t) => t.owner);
+  const worth = (q, paid) => {
+    const after = before.slice();
+    after[i] = q.id;
+    return positionValue(q.id, after, q.cash - paid) - positionValue(q.id, before, q.cash);
+  };
+  const denial = Math.max(0, ...alive().filter((q) => q !== p).map((q) => rivalWeight(p, q) * (worth(q, BOARD[i].price) - BOARD[i].price * 0.2)));
+  let lo = 0, hi = Math.max(0, p.cash - dangerReserve(p));
+  while (hi - lo > 5) {
+    const mid = (lo + hi) / 2;
+    if (worth(p, mid) + denial * 0.5 > 0) lo = mid; else hi = mid;
+  }
+  return Math.floor(lo / 10) * 10;
+}
+
 function cpuWantsToBuy(p, i) {
   const price = BOARD[i].price;
+  if (level(p).smart) return smartPrice(p, i) >= price;
   const keen = cpuValue(p, i) >= price * 1.4;
   const reserve = keen ? 40 : unownedCount() > 14 ? 100 : 180;
-  return p.cash - price >= reserve;
+  return p.cash - price >= reserve * level(p).reserve;
 }
 
 function cpuRaiseFunds(p, amount) {
@@ -648,95 +715,209 @@ function cpuRaiseFunds(p, amount) {
   return p.cash >= amount;
 }
 
-function cpuManage(p) {
+async function cpuManage(p) {
   if (p.bankrupt) return;
-  const reserve = 150 + 20 * alive().length;
+  const reserve = level(p).smart ? dangerReserve(p) + 40 : (150 + 20 * alive().length) * level(p).reserve;
+  const smart = level(p).smart;
+  const freed = [], built = new Map(), mortgaged = [];
+  // Smart CPUs get every set they own up to three houses before anything else.
+  const underBuilt = () => S.housesLeft > 0 && ownedBy(p).some((i) => BOARD[i].group && ownsSet(p.id, BOARD[i].group) && S.tiles[i].houses < 3
+    && GROUP_TILES[BOARD[i].group].every((j) => !S.tiles[j].mortgaged));
   // pay off mortgages when rich
   for (const i of ownedBy(p)) {
-    if (S.tiles[i].mortgaged && p.cash - unmortgageCost(i) > reserve * 2) unmortgage(p, i);
+    if (smart && underBuilt() && !(BOARD[i].group && ownsSet(p.id, BOARD[i].group))) continue;
+    if (S.tiles[i].mortgaged && p.cash - unmortgageCost(i) > reserve * 2) { unmortgage(p, i); freed.push(BOARD[i].name); }
   }
   // build evenly, best groups first
-  let built = true;
-  while (built) {
-    built = false;
-    const options = ownedBy(p).filter((i) => canBuild(p, i) && p.cash - GROUPS[BOARD[i].group].houseCost >= reserve);
-    if (!options.length) break;
-    options.sort((a, b) => S.tiles[a].houses - S.tiles[b].houses || BOARD[b].price - BOARD[a].price);
-    build(p, options[0]);
-    built = true;
-  }
-}
-
-// A CPU tries to buy the one property it's missing from a colour set.
-async function cpuTryTrade(p) {
-  S.tradeAsked = S.tradeAsked || {};
-  for (const g of Object.keys(GROUP_TILES)) {
-    const set = GROUP_TILES[g];
-    const missing = set.filter((i) => S.tiles[i].owner !== p.id);
-    if (missing.length !== 1 || missing.length === set.length) continue;
-    const want = missing[0], owner = S.tiles[want].owner;
-    if (owner === null || groupHasBuildings(g)) continue;
-    const other = P(owner);
-    const key = `${p.id}-${want}`;
-    if ((S.tradeAsked[key] || 0) > S.round) continue;
-    S.tradeAsked[key] = S.round + (other.cpu ? 2 : 6);
-
-    // Something of ours that would complete *their* set makes a good sweetener.
-    const swaps = tradeable(p).filter((j) => {
-      const g2 = BOARD[j].group;
-      return g2 && g2 !== g && GROUP_TILES[g2].every((k) => k === j || S.tiles[k].owner === other.id);
-    });
-    const price = BOARD[want].price;
-    const offers = [];
-    for (const give of [[], ...swaps.map((j) => [j])]) {
-      for (const mult of [0, 1, 1.5, 2, 2.5, 3]) {
-        const cash = Math.round((price * mult) / 10) * 10;
-        if (cash <= p.cash - 80 && (give.length || cash)) offers.push({ give, cash });
-      }
-    }
-    const pick = offers.find((o) => cpuTradeGain(other, p, [want], o.give, o.cash) > 25);
-    if (!pick) continue;
-    let accepted = true;
-    if (!other.cpu) {
-      const giveTxt = [...pick.give.map((j) => esc(BOARD[j].name)), pick.cash ? fmt(pick.cash) : ""].filter(Boolean).join(" + ");
-      accepted = await modal({
-        title: `🤝 Offer from ${p.token} ${esc(p.name)}`,
-        html: `<p><b>${esc(other.name)}</b>, ${esc(p.name)} offers you <b>${giveTxt}</b> for <b>${esc(BOARD[want].name)}</b>.</p>${deedHtml(want)}`,
-        buttons: [{ label: "Decline", value: false, danger: true }, { label: "Accept", value: true, primary: true }],
-      });
-    }
-    if (!accepted) {
-      log(`${other.name} turned down ${p.name}'s offer for ${BOARD[want].name}.`, p);
+  while (true) {
+    let options = ownedBy(p).filter((i) => canBuild(p, i) && p.cash - GROUPS[BOARD[i].group].houseCost >= reserve);
+    if (!options.length && smart && underBuilt()) {
+      // Mortgage a property that isn't part of a set to pay for the next house.
+      const spare = ownedBy(p).filter((i) => canMortgage(p, i) && !(BOARD[i].group && ownsSet(p.id, BOARD[i].group)));
+      if (!spare.length) break;
+      spare.sort((a, b) => BOARD[a].price - BOARD[b].price);
+      mortgage(p, spare[0]);
+      mortgaged.push(BOARD[spare[0]].name);
       continue;
     }
-    S.tiles[want].owner = p.id;
-    for (const j of pick.give) S.tiles[j].owner = other.id;
-    p.cash -= pick.cash;
-    other.cash += pick.cash;
-    const gave = [...pick.give.map((j) => BOARD[j].name), pick.cash ? fmt(pick.cash) : ""].filter(Boolean).join(" + ");
-    log(`🤝 ${p.name} bought ${BOARD[want].name} from ${other.name} for ${gave}.`, p);
-    toast(`${p.name} traded for ${BOARD[want].name}`);
-    render();
-    return;
+    if (!options.length) break;
+    // Smart CPUs build where the next house adds the most rent per pound.
+    const payback = (i) => ((BOARD[i].rents[S.tiles[i].houses + 1] - BOARD[i].rents[S.tiles[i].houses]) * LANDING[BOARD[i].group]) / GROUPS[BOARD[i].group].houseCost;
+    options.sort((a, b) => S.tiles[a].houses - S.tiles[b].houses || (level(p).smart ? payback(b) - payback(a) : BOARD[b].price - BOARD[a].price));
+    build(p, options[0]);
+    built.set(options[0], S.tiles[options[0]].houses);
   }
+  const done = [];
+  if (mortgaged.length) done.push(`mortgaged ${mortgaged.map(esc).join(", ")}`);
+  if (freed.length) done.push(`paid off the mortgage on ${freed.map(esc).join(", ")}`);
+  if (built.size) done.push(`built up ${[...built].map(([i, h]) => `${esc(BOARD[i].name)} (${h === 5 ? "hotel" : `${h} house${h > 1 ? "s" : ""}`})`).join(", ")}`);
+  if (done.length) await announce(`${p.token} <b>${esc(p.name)}</b> ${done.join(" and ")}.`, 2000);
 }
 
-// Value of a trade from CPU `p`'s point of view. Positive = good for p.
-function cpuTradeGain(p, other, give, get, cashToP) {
-  const worth = (i) => (S.tiles[i].mortgaged ? BOARD[i].price * 0.45 : BOARD[i].price);
-  let gain = cashToP;
-  for (const i of get) gain += worth(i) * (cpuValue(p, i) / BOARD[i].price);
-  for (const i of give) {
-    let v = worth(i);
-    const g = BOARD[i].group;
-    if (g) {
-      if (GROUP_TILES[g].every((j) => S.tiles[j].owner === p.id)) v *= 2; // breaks my set
-      const theirs = GROUP_TILES[g].filter((j) => S.tiles[j].owner === other.id || give.includes(j)).length;
-      if (theirs === GROUP_TILES[g].length) v *= 2.5; // hands them a set
+// ---------------------------------------------------------------- CPU trading
+
+// How much a set's squares get landed on, relative to average (Jail feeds orange and red).
+const LANDING = { brown: 0.85, lightblue: 0.95, pink: 1, orange: 1.2, red: 1.1, yellow: 1, green: 0.95, darkblue: 0.9 };
+const STATION_BONUS = [0, 0, 40, 110, 250];
+
+// What `pid`'s holdings are worth to them if tile i belonged to owners[i] and
+// they had `cash`. A full set is worth its deeds plus the rent it can earn once
+// built up, which depends on having the cash to build.
+function positionValue(pid, owners, cash) {
+  const deed = (i) => (S.tiles[i].mortgaged ? BOARD[i].price * 0.45 : BOARD[i].price);
+  let v = 0, potential = 0, needed = 0;
+  for (const [g, tiles] of Object.entries(GROUP_TILES)) {
+    const mine = tiles.filter((i) => owners[i] === pid);
+    if (!mine.length) continue;
+    for (const i of mine) v += deed(i);
+    // Rent at three houses, less a share of what those houses cost.
+    const earning = tiles.reduce((s, i) => s + BOARD[i].rents[3], 0) * 0.6 * LANDING[g] - tiles.length * GROUPS[g].houseCost * 0.9;
+    if (mine.length === tiles.length) {
+      potential += earning;
+      for (const i of tiles) {
+        needed += Math.max(0, 3 - S.tiles[i].houses) * GROUPS[g].houseCost;
+        if (S.tiles[i].mortgaged) needed += unmortgageCost(i);
+      }
+    } else if (tiles.every((i) => owners[i] === pid || owners[i] === null)) {
+      v += earning * 0.15 * (mine.length / tiles.length); // still possible to complete from the bank
     }
-    gain -= v * 1.1;
   }
-  return gain;
+  v += potential * (0.6 + 0.4 * (needed ? Math.min(1, Math.max(0, cash - 100) / needed) : 1));
+  // Running low on cash is risky; cash beyond what building needs earns nothing.
+  v += cash - Math.max(0, 150 - cash) - 0.3 * Math.max(0, cash - needed - 300);
+  for (const type of ["station", "utility"]) {
+    const mine = BOARD.map((b, i) => i).filter((i) => BOARD[i].type === type && owners[i] === pid);
+    for (const i of mine) v += deed(i);
+    v += type === "station" ? STATION_BONUS[mine.length] : mine.length === 2 ? 40 : 0;
+  }
+  return v;
+}
+
+// How much CPU `p` minds `other` gaining: fully in a duel, less with several
+// rivals (helping one of them still leaves the rest behind), more if `other` leads.
+function rivalWeight(p, other) {
+  const rivals = alive().filter((q) => q !== p);
+  const w = rivals.length <= 1 ? 1 : netWorth(other) >= Math.max(...rivals.map(netWorth)) ? 0.85 : 0.6;
+  return w * level(p).rivals;
+}
+
+// Value of a trade to CPU `p`: p gives `give` and gets `get` plus `cashToP`
+// (negative if p pays). It's p's own gain minus a share of what `other` gains,
+// so handing a rival a colour set costs what that set is worth to them.
+function cpuTradeScore(p, other, give, get, cashToP) {
+  const before = S.tiles.map((t) => t.owner);
+  const after = before.slice();
+  for (const i of give) after[i] = other.id;
+  for (const i of get) after[i] = p.id;
+  const mine = positionValue(p.id, after, p.cash + cashToP) - positionValue(p.id, before, p.cash);
+  const theirs = positionValue(other.id, after, other.cash - cashToP) - positionValue(other.id, before, other.cash);
+  return { mine, theirs, score: mine - rivalWeight(p, other) * theirs };
+}
+
+const cpuAccepts = (p, other, give, get, cashToP) =>
+  p.cash + cashToP >= 50 && cpuTradeScore(p, other, give, get, cashToP).score > level(p).accept;
+
+// The cash (from p to other, in £10 steps, possibly negative) that makes the
+// deal just good enough for `other`, or null if no amount in range will do.
+function cheapestCash(lo, hi, ok) {
+  if (!ok(hi)) return null;
+  while (hi - lo > 10) {
+    const mid = Math.round((lo + hi) / 20) * 10;
+    if (mid <= lo || mid >= hi) break;
+    if (ok(mid)) hi = mid; else lo = mid;
+  }
+  return ok(lo) ? lo : hi;
+}
+
+// When CPU `cpu` turns down `human`'s offer (human gives `give` plus `cash`, gets
+// `get`), find the deal nearest to it that the CPU would take: a different cash
+// amount, one more of the human's properties, or one fewer of the CPU's. Of
+// those, offer the one that looks best for the human.
+function cpuCounterOffer(cpu, human, give, get, cash) {
+  const lo = -Math.max(0, Math.floor((cpu.cash - 50) / 10) * 10), hi = Math.floor(human.cash / 10) * 10;
+  const options = [{ give, get }];
+  for (const j of tradeable(human)) if (!give.includes(j)) options.push({ give: [...give, j], get });
+  if (get.length > 1) for (const j of get) options.push({ give, get: get.filter((k) => k !== j) });
+  let best = null;
+  for (const o of options) {
+    const c = cheapestCash(lo, hi, (c) => cpuAccepts(cpu, human, o.get, o.give, c));
+    if (c === null || (!o.give.length && !o.get.length)) continue;
+    const forHuman = cpuTradeScore(human, cpu, o.give, o.get, -c).mine;
+    if (!best || forHuman > best.forHuman) best = { ...o, cash: c, forHuman };
+  }
+  return best && (best.cash !== cash || best.give !== give || best.get !== get) ? best : null;
+}
+
+// A CPU looks for the best deal that gets it closer to a colour set (or more
+// stations/utilities) and that the other side should accept.
+async function cpuTryTrade(p) {
+  if (level(p).noProposals) return;
+  S.tradeAsked = S.tradeAsked || {};
+  const myTiles = tradeable(p);
+  let best = null;
+  for (const other of alive().filter((o) => o !== p)) {
+    const theirTiles = tradeable(other);
+    const wants = new Map(); // key -> tiles to ask for
+    for (const i of theirTiles) {
+      const b = BOARD[i];
+      if (b.group) {
+        const tiles = GROUP_TILES[b.group];
+        if (!tiles.some((j) => S.tiles[j].owner === p.id)) continue;
+        const missing = tiles.filter((j) => S.tiles[j].owner !== p.id);
+        // Ask for everything still missing if they hold all of it, else just this one.
+        const want = missing.every((j) => theirTiles.includes(j)) ? missing : [i];
+        wants.set(want.join(","), want);
+      } else if (countType(p.id, b.type)) wants.set(`${i}`, [i]);
+    }
+    for (const [key, get] of wants) {
+      const k = `${p.id}-${other.id}-${key}`;
+      if ((S.tradeAsked[k] || 0) > S.round) continue;
+      // What we might hand over: nothing, any single property, or our share of a set they're building.
+      const gives = [[], ...myTiles.filter((j) => !get.some((g) => BOARD[g].group && BOARD[g].group === BOARD[j].group)).map((j) => [j])];
+      for (const g of Object.keys(GROUP_TILES)) {
+        const ours = GROUP_TILES[g].filter((j) => S.tiles[j].owner === p.id);
+        if (ours.length > 1 && ours.every((j) => myTiles.includes(j)) && GROUP_TILES[g].every((j) => ours.includes(j) || S.tiles[j].owner === other.id)) gives.push(ours);
+      }
+      const accept = other.cpu
+        ? (give, c) => cpuAccepts(other, p, get, give, c)
+        // For a human, offer what our own judgement would call a fair deal for them.
+        : (give, c) => { const t = cpuTradeScore(other, p, get, give, c); return t.mine > 0 && t.score > -40; };
+      for (const give of gives) {
+        const c = cheapestCash(-Math.max(0, Math.floor((other.cash - 100) / 10) * 10),
+          Math.max(0, Math.floor((p.cash - 200) / 10) * 10), (c) => accept(give, c));
+        if (c === null || (!give.length && c <= 0)) continue;
+        const { score } = cpuTradeScore(p, other, give, get, -c);
+        if (score > level(p).accept + 15 && (!best || score > best.score)) best = { other, give, get, cash: c, score, k };
+      }
+    }
+  }
+  if (!best) return;
+  const { other, give, get, cash } = best;
+  S.tradeAsked[best.k] = S.round + (other.cpu ? 2 : 6);
+  const side = (tiles, money) => [...tiles.map((j) => BOARD[j].name), money > 0 ? fmt(money) : ""].filter(Boolean).join(" + ") || "nothing";
+  if (!other.cpu) {
+    const accepted = await modal({
+      title: `🤝 Offer from ${p.token} ${esc(p.name)}`,
+      html: `<p><b>${esc(other.name)}</b>, ${esc(p.name)} offers you <b>${esc(side(give, cash))}</b>
+        in exchange for <b>${esc(side(get, -cash))}</b>.</p>${get.map((j) => deedHtml(j)).join("")}`,
+      buttons: [{ label: "Decline", value: false, danger: true }, { label: "Accept", value: true, primary: true }],
+    });
+    if (!accepted) {
+      log(`${other.name} turned down ${p.name}'s offer for ${side(get, 0)}.`, p);
+      return;
+    }
+  }
+  if (other.cpu) {
+    await announce(`🤝 ${p.token} <b>${esc(p.name)}</b> offers ${other.token} <b>${esc(other.name)}</b> ${esc(side(give, cash))} for ${esc(side(get, -cash))}…`, 2200);
+  }
+  for (const j of get) S.tiles[j].owner = p.id;
+  for (const j of give) S.tiles[j].owner = other.id;
+  p.cash -= cash;
+  other.cash += cash;
+  log(`🤝 ${p.name} traded with ${other.name}: gave ${side(give, cash)}, got ${side(get, -cash)}.`, p, true);
+  toast(`${p.name} traded for ${get.map((j) => BOARD[j].name).join(", ")}`);
+  if (other.cpu) await announce(`🤝 ${esc(other.name)} accepted. ${esc(p.name)} now owns ${esc(get.map((j) => BOARD[j].name).join(", "))}.`, 1800);
+  render();
 }
 
 // ---------------------------------------------------------------- UI: prompts, modals, toasts
@@ -912,7 +1093,7 @@ function openTrade(p) {
   modal({
     title: "🤝 Propose a trade",
     wide: true,
-    html: `<label class="trade-with">Trade with <select id="trade-other">${others.map((o) => `<option value="${o.id}">${o.token} ${esc(o.name)}${o.cpu ? " (CPU)" : ""}</option>`).join("")}</select></label>
+    html: `<label class="trade-with">Trade with <select id="trade-other">${others.map((o) => `<option value="${o.id}">${o.token} ${esc(o.name)}${o.cpu ? ` (CPU · ${level(o).label})` : ""}</option>`).join("")}</select></label>
       <div class="trade-cols">
         <div><h3>You give</h3><div id="trade-give"></div><label class="trade-cash">Cash £<input type="number" id="cash-give" min="0" step="10" value="0"></label></div>
         <div><h3>You get</h3><div id="trade-get"></div><label class="trade-cash">Cash £<input type="number" id="cash-get" min="0" step="10" value="0"></label></div>
@@ -941,8 +1122,20 @@ function openTrade(p) {
         if (cashGet > other.cash) return (msg.textContent = `${other.name} only has ${fmt(other.cash)}.`);
         let accepted;
         if (other.cpu) {
-          accepted = cpuTradeGain(other, p, get, give, cashGive - cashGet) > 25;
-          if (!accepted) return (msg.textContent = `${other.name} declines. Try sweetening the deal.`);
+          accepted = cpuAccepts(other, p, get, give, cashGive - cashGet);
+          if (!accepted) {
+            const c = cpuCounterOffer(other, p, give, get, cashGive - cashGet);
+            if (!c) return (msg.textContent = `${other.name} declines, and can't see a deal to be made here.`);
+            // Put the counter-offer in the form so it can be agreed to or tweaked.
+            box.querySelectorAll("input[data-side]").forEach((x) => (x.checked = (x.dataset.side === "give" ? c.give : c.get).includes(+x.value)));
+            box.querySelector("#cash-give").value = Math.max(0, c.cash);
+            box.querySelector("#cash-get").value = Math.max(0, -c.cash);
+            const side = (tiles, money) => [...tiles.map((j) => esc(BOARD[j].name)), money > 0 ? fmt(money) : ""].filter(Boolean).join(" + ") || "nothing";
+            msg.innerHTML = `${esc(other.name)} declines, but counters: you give <b>${side(c.give, c.cash)}</b>, you get <b>${side(c.get, -c.cash)}</b>.
+              <button class="primary counter-yes">Agree</button> <span class="small">or change it and propose again.</span>`;
+            msg.querySelector(".counter-yes").addEventListener("click", () => proposeTrade());
+            return;
+          }
         } else {
           const box2 = box.querySelector(".modal-buttons");
           box2.innerHTML = `<span class="handoff">${other.token} ${esc(other.name)}, accept this trade?</span>
@@ -1041,7 +1234,7 @@ function renderPlayers() {
     const props = ownedBy(p);
     return `<div class="player ${p.id === S.turn ? "active" : ""} ${p.bankrupt ? "bankrupt" : ""}" style="--c:${p.color}">
       <div class="phead"><span class="tok" style="--c:${p.color}">${p.token}</span>
-        <span class="pname">${esc(p.name)}${p.cpu ? ' <small>CPU</small>' : ""}</span>
+        <span class="pname">${esc(p.name)}${p.cpu ? ` <small>CPU${p.level && p.level !== "normal" ? ` · ${level(p).label}` : ""}</small>` : ""}</span>
         <span class="pcash">${p.bankrupt ? "Bankrupt" : fmt(p.cash)}</span></div>
       <div class="pmeta">${p.inJail ? "🚔 In Jail · " : ""}${p.jailCards.length ? `🎫×${p.jailCards.length} · ` : ""}Net worth ${fmt(netWorth(p))}</div>
       <div class="pprops">${props.map((i) => `<span class="chip ${S.tiles[i].mortgaged ? "mort" : ""}" data-i="${i}" title="${esc(BOARD[i].name)}" style="background:${BOARD[i].group ? GROUPS[BOARD[i].group].color : "#ccc"}">${BOARD[i].icon || (S.tiles[i].houses === 5 ? "H" : S.tiles[i].houses || "")}</span>`).join("")}</div>
@@ -1087,12 +1280,12 @@ function renderLog() {
 // ---------------------------------------------------------------- setup screen
 
 function openSetup() {
-  const rows = DEFAULT_NAMES.slice(0, 4).map((name, k) => ({ name, cpu: k > 0, token: TOKENS[k] }));
+  const rows = DEFAULT_NAMES.slice(0, 4).map((name, k) => ({ name, cpu: k > 0, level: "normal", token: TOKENS[k] }));
   const opts = { startCash: 1500, auction: true, freeParking: false, speed: "normal" };
   const rowsHtml = () => rows.map((r, k) => `<div class="setup-row" style="--c:${PLAYER_COLORS[k]}">
       <button class="tok tok-pick" data-k="${k}" title="Change token" style="--c:${PLAYER_COLORS[k]}">${r.token}</button>
       <input class="sname" data-k="${k}" value="${esc(r.name)}" maxlength="14" aria-label="Player ${k + 1} name">
-      <select class="stype" data-k="${k}" aria-label="Player ${k + 1} type"><option value="h" ${r.cpu ? "" : "selected"}>Human</option><option value="c" ${r.cpu ? "selected" : ""}>CPU</option></select>
+      <select class="stype" data-k="${k}" aria-label="Player ${k + 1} type"><option value="h" ${r.cpu ? "" : "selected"}>Human</option>${Object.entries(CPU_LEVELS).map(([v, l]) => `<option value="${v}" ${r.cpu && r.level === v ? "selected" : ""}>CPU · ${l.label}</option>`).join("")}</select>
       <button class="sdel" data-k="${k}" ${rows.length <= 2 ? "disabled" : ""} aria-label="Remove player">✕</button>
     </div>`).join("");
   modal({
@@ -1115,7 +1308,12 @@ function openSetup() {
         box.querySelector("#add-player").disabled = rows.length >= 6;
       };
       list.addEventListener("input", (e) => { if (e.target.classList.contains("sname")) rows[+e.target.dataset.k].name = e.target.value; });
-      list.addEventListener("change", (e) => { if (e.target.classList.contains("stype")) rows[+e.target.dataset.k].cpu = e.target.value === "c"; });
+      list.addEventListener("change", (e) => {
+        if (!e.target.classList.contains("stype")) return;
+        const r = rows[+e.target.dataset.k];
+        r.cpu = e.target.value !== "h";
+        if (r.cpu) r.level = e.target.value;
+      });
       list.addEventListener("click", (e) => {
         const pick = e.target.closest(".tok-pick"), del = e.target.closest(".sdel");
         if (pick) {
@@ -1133,7 +1331,7 @@ function openSetup() {
       box.querySelector("#add-player").addEventListener("click", () => {
         if (rows.length >= 6) return;
         const token = TOKENS.find((t) => !rows.some((r) => r.token === t));
-        rows.push({ name: DEFAULT_NAMES[rows.length], cpu: true, token });
+        rows.push({ name: DEFAULT_NAMES[rows.length], cpu: true, level: rows.find((x) => x.cpu)?.level || "normal", token });
         draw();
       });
       box.querySelector("#o-cash").addEventListener("change", (e) => (opts.startCash = +e.target.value));
@@ -1194,7 +1392,7 @@ function init() {
   });
   $("#btn-end").addEventListener("click", async () => {
     const ok = await modal({ title: "End the game now?", html: "<p>The player with the highest net worth wins.</p>", buttons: [{ label: "Cancel", value: false }, { label: "End game", value: true, primary: true }] });
-    if (ok) showWinner();
+    if (ok && !S.over) showWinner();
   });
   $("#btn-rules").addEventListener("click", () => modal({ title: "How to play", html: $("#rules-tpl").innerHTML, buttons: [{ label: "Got it", value: true, primary: true }], wide: true }));
   document.addEventListener("keydown", (e) => {

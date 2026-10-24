@@ -503,6 +503,8 @@ button.auto::after {
 .trade-cash { display: flex; gap: 4px; align-items: center; margin-top: 8px; font-size: 0.9em; }
 .trade-cash input { width: 90px; padding: 4px 6px; border: 1px solid #c9c2ad; border-radius: 6px; }
 .trade-msg { color: var(--accent); font-weight: 600; min-height: 1.2em; margin: 8px 0 0; }
+.trade-msg .counter-yes { padding: 4px 14px; margin-left: 6px; }
+.trade-msg .small { font-weight: 400; color: inherit; opacity: 0.8; }
 @media (max-width: 480px) { .trade-cols { grid-template-columns: 1fr; } }
 
 .standings { padding-left: 1.4em; }
