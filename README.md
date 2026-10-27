@@ -13,6 +13,8 @@ A complete, browser-based take on the classic property-trading board game (Londo
 - Trading property and cash between players; CPUs judge deals by what each side gains (they won't hand you a colour set cheaply) and propose their own
 - CPU difficulty per opponent: Easy, Normal or Hard (Hard sizes its cash reserve to the rent ahead, mortgages spare property to build, and prices property by what it does for rivals too)
 - When a CPU turns down your trade it makes a counter-offer you can agree to or tweak
+- CPU personalities (optional): each CPU is randomly a Steady player, Collector, Developer, Hoarder, Dealmaker or Gambler
+- Round events (optional): a surprise every round, such as a building boom, rent strike, heatwave, tax holiday or council rates
 - CPU moves (building, trades, raising cash) are shown on screen long enough to follow, even at Instant speed
 - After the game ends you can close the results to look over the final board and game log
 - Optional Free Parking jackpot house rule, adjustable starting cash and CPU speed

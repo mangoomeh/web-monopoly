@@ -118,3 +118,28 @@ const RULES = {
   maxHotels: 12,
   mortgageInterest: 0.1,
 };
+
+const GROUP_NAMES = {
+  brown: "the browns", lightblue: "the light blues", pink: "the pinks", orange: "the oranges",
+  red: "the reds", yellow: "the yellows", green: "the greens", darkblue: "the dark blues",
+};
+
+// Round events (optional): one is drawn at the start of every round and lasts
+// until the next. `{group}` is filled with a colour set picked at random.
+const EVENTS = [
+  { id: "quiet", icon: "☀️", title: "A quiet week", text: "Nothing out of the ordinary happens this round." },
+  { id: "quiet", icon: "☀️", title: "A quiet week", text: "Nothing out of the ordinary happens this round." },
+  { id: "quiet", icon: "☀️", title: "A quiet week", text: "Nothing out of the ordinary happens this round." },
+  { id: "boom", icon: "🏗️", title: "Building boom", text: "Houses and hotels cost 25% less this round." },
+  { id: "sale", icon: "🏷️", title: "Property sale", text: "Unowned property costs 25% less this round." },
+  { id: "hot", icon: "🔥", title: "Hot street", text: "Rent on {group} is doubled this round." },
+  { id: "strike", icon: "✊", title: "Rent strike", text: "No rent is paid on {group} this round." },
+  { id: "rail", icon: "🚧", title: "Rail strike", text: "Stations charge no rent this round." },
+  { id: "tourists", icon: "📸", title: "Tourist season", text: "Station rent is doubled this round." },
+  { id: "heatwave", icon: "🌡️", title: "Heatwave", text: "Utility rent is doubled this round." },
+  { id: "taxfree", icon: "🎉", title: "Tax holiday", text: "Income Tax and Super Tax are waived this round." },
+  { id: "payday", icon: "💰", title: "Bonus season", text: "Passing GO pays £300 this round." },
+  { id: "dividend", icon: "📈", title: "Bank dividend", text: "Every player receives £50 now." },
+  { id: "rates", icon: "🧾", title: "Council rates", text: "Every player pays £10 now for each property they own." },
+  { id: "amnesty", icon: "🔓", title: "Jail amnesty", text: "Everyone in Jail is released now." },
+];
