@@ -36,6 +36,7 @@ function newState(setup) {
   return {
     players: setup.players.map((p, id) => ({
       id, name: p.name, cpu: p.cpu, level: p.level || "normal", token: p.token, color: PLAYER_COLORS[id],
+      persona: p.cpu && setup.options.personas ? Object.keys(PERSONAS)[Math.floor(Math.random() * Object.keys(PERSONAS).length)] : null,
       cash: setup.options.startCash, pos: 0, inJail: false, jailTurns: 0, jailCards: [], bankrupt: false,
     })),
     tiles: BOARD.map(() => ({ owner: null, houses: 0, mortgaged: false })),
@@ -77,7 +78,27 @@ const countType = (pid, type) => BOARD.filter((b, i) => b.type === type && S.til
 const unmortgageCost = (i) => Math.ceil((BOARD[i].price / 2) * (1 + RULES.mortgageInterest));
 const unownedCount = () => S.tiles.filter((t, i) => isBuyable(i) && t.owner === null).length;
 
+// The round event in force, if events are on.
+const activeEvent = () => (S.options.events && S.event ? EVENTS.find((e) => e.id === S.event.id) : null);
+const eventIs = (id) => activeEvent()?.id === id;
+const discounted = (amount) => Math.ceil((amount * 0.75) / 5) * 5;
+const houseCost = (group) => (eventIs("boom") ? discounted(GROUPS[group].houseCost) : GROUPS[group].houseCost);
+const buyPrice = (i) => (eventIs("sale") ? discounted(BOARD[i].price) : BOARD[i].price);
+const goSalary = () => (eventIs("payday") ? 300 : RULES.goSalary);
+
+function eventRentFactor(i) {
+  const b = BOARD[i];
+  if (b.group && S.event?.group === b.group) return eventIs("hot") ? 2 : eventIs("strike") ? 0 : 1;
+  if (b.type === "station") return eventIs("rail") ? 0 : eventIs("tourists") ? 2 : 1;
+  if (b.type === "utility" && eventIs("heatwave")) return 2;
+  return 1;
+}
+
 function rentFor(i, diceTotal, cardMode) {
+  return baseRent(i, diceTotal, cardMode) * eventRentFactor(i);
+}
+
+function baseRent(i, diceTotal, cardMode) {
   const b = BOARD[i], t = S.tiles[i];
   if (t.owner === null || t.mortgaged) return 0;
   if (b.type === "property") {
@@ -126,11 +147,11 @@ function canBuild(p, i) {
   if (set.some((j) => S.tiles[j].mortgaged)) return false;
   if (t.houses > Math.min(...set.map((j) => S.tiles[j].houses))) return false;
   if (t.houses === 4 ? S.hotelsLeft < 1 : S.housesLeft < 1) return false;
-  return p.cash >= GROUPS[b.group].houseCost;
+  return p.cash >= houseCost(b.group);
 }
 
 function build(p, i) {
-  const t = S.tiles[i], cost = GROUPS[BOARD[i].group].houseCost;
+  const t = S.tiles[i], cost = houseCost(BOARD[i].group);
   p.cash -= cost;
   if (t.houses === 4) { S.hotelsLeft--; S.housesLeft += 4; } else S.housesLeft--;
   t.houses++;
@@ -264,8 +285,9 @@ async function moveSteps(p, steps) {
   for (let k = 0; k < steps; k++) {
     p.pos = (p.pos + 1) % 40;
     if (p.pos === 0) {
-      p.cash += RULES.goSalary;
-      log(`${p.name} passed GO and collected ${fmt(RULES.goSalary)}.`, p);
+      const salary = goSalary();
+      p.cash += salary;
+      log(`${p.name} passed GO and collected ${fmt(salary)}.`, p);
     }
     renderTokens();
     renderPlayers();
@@ -310,6 +332,10 @@ async function rollDice() {
 async function gameLoop() {
   while (!S.over) {
     if (alive().length <= 1) return showWinner();
+    if (S.options.events && S.eventRound !== S.round) {
+      await startRoundEvent();
+      if (alive().length <= 1) return showWinner();
+    }
     const p = P(S.turn);
     if (!p.bankrupt) {
       log(`— ${p.name}'s turn —`, p, true);
@@ -372,6 +398,37 @@ async function endTurn(p) {
   }
 }
 
+// Draw this round's event, apply anything that happens at once, and show it.
+async function startRoundEvent() {
+  S.eventRound = S.round;
+  if (!S.decks.events?.length) S.decks.events = shuffle(EVENTS.map((_, k) => k));
+  const e = EVENTS[S.decks.events.pop()];
+  S.event = { id: e.id };
+  if (e.text.includes("{group}")) {
+    // Prefer a set somebody owns part of, so the event matters.
+    const groups = Object.keys(GROUP_TILES), owned = groups.filter((g) => GROUP_TILES[g].some((i) => S.tiles[i].owner !== null));
+    const pool = owned.length ? owned : groups;
+    S.event.group = pool[Math.floor(Math.random() * pool.length)];
+  }
+  log(`${e.icon} Round ${S.round} event — ${e.title}: ${eventText()}`, null, true);
+  const html = eventHtml();
+  if (e.id === "quiet") return render();
+  if (alive().some((p) => !p.cpu)) await ask({ cpu: true }, "", [{ label: "OK", value: true, primary: true }], html, 6000);
+  else await announce(html, 2500);
+  if (e.id === "dividend") for (const p of alive()) p.cash += 50;
+  if (e.id === "amnesty") for (const p of alive().filter((p) => p.inJail)) { p.inJail = false; log(`🔓 ${p.name} walks out of Jail.`, p); }
+  if (e.id === "rates") {
+    for (const p of alive()) {
+      const n = ownedBy(p).length;
+      if (n) { log(`${p.name} pays ${fmt(n * 10)} in council rates.`, p); await pay(p, n * 10, null, true); }
+    }
+  }
+  render();
+}
+
+const eventText = () => activeEvent().text.replace("{group}", GROUP_NAMES[S.event.group]);
+const eventHtml = () => `<div class="card event"><div class="card-title">${activeEvent().icon} ${activeEvent().title}</div><p>${esc(eventText())}</p></div>`;
+
 // Returns "free" if the player should now roll normally, "done" otherwise.
 async function jailTurn(p) {
   p.jailTurns++;
@@ -431,6 +488,7 @@ async function landOn(p, diceTotal, cardMode) {
     const owner = P(t.owner);
     if (t.mortgaged) return log(`${b.name} is mortgaged — no rent due.`, p);
     const rent = rentFor(i, diceTotal, cardMode);
+    if (!rent) return log(`${activeEvent()?.icon || ""} No rent due on ${b.name} this round.`, p);
     log(`${p.name} owes ${owner.name} ${fmt(rent)} rent for ${b.name}.`, p);
     if (!p.cpu) await showInfo(p, `You landed on <b>${esc(b.name)}</b>, owned by ${esc(owner.name)}. Rent: <b>${fmt(rent)}</b>.`);
     if (await pay(p, rent, owner)) toast(`${p.name} paid ${owner.name} ${fmt(rent)}`);
@@ -438,6 +496,7 @@ async function landOn(p, diceTotal, cardMode) {
   }
   switch (b.type) {
     case "tax":
+      if (eventIs("taxfree")) return log(`🎉 Tax holiday: ${p.name} pays no ${b.name}.`, p);
       log(`${p.name} pays ${b.name} of ${fmt(b.amount)}.`, p);
       if (!p.cpu) await showInfo(p, `<b>${b.name}</b>: pay ${fmt(b.amount)}.`);
       await pay(p, b.amount, null, true);
@@ -520,7 +579,7 @@ async function drawCard(p, deck, diceTotal) {
 }
 
 async function offerToBuy(p, i) {
-  const b = BOARD[i];
+  const b = BOARD[i], price = buyPrice(i);
   let buy;
   if (p.cpu) {
     buy = cpuWantsToBuy(p, i);
@@ -528,18 +587,18 @@ async function offerToBuy(p, i) {
   } else {
     buy = (await ask(
       p,
-      `<b>${esc(b.name)}</b> is for sale for <b>${fmt(b.price)}</b>. You have ${fmt(p.cash)}.`,
+      `<b>${esc(b.name)}</b> is for sale for <b>${fmt(price)}</b>${price < b.price ? ` (${activeEvent().title.toLowerCase()})` : ""}. You have ${fmt(p.cash)}.`,
       [
-        { label: `Buy for ${fmt(b.price)}`, value: "buy", primary: true, disabled: () => p.cash < b.price },
+        { label: `Buy for ${fmt(price)}`, value: "buy", primary: true, disabled: () => p.cash < price },
         { label: S.options.auction ? "Auction it" : "Don't buy", value: "pass" },
       ],
       deedHtml(i)
     )) === "buy";
   }
-  if (buy && p.cash >= b.price) {
-    p.cash -= b.price;
+  if (buy && p.cash >= price) {
+    p.cash -= price;
     S.tiles[i].owner = p.id;
-    log(`🏠 ${p.name} bought ${b.name} for ${fmt(b.price)}.`, p);
+    log(`🏠 ${p.name} bought ${b.name} for ${fmt(price)}.`, p);
     toast(`${p.name} bought ${b.name}`);
     render();
   } else {
@@ -564,7 +623,7 @@ async function auction(i, starter) {
     if (q.cpu) {
       setStatus(`🔨 Auction: <b>${esc(b.name)}</b> — high bid ${fmt(high)}${leader ? ` (${esc(leader.name)})` : ""}. ${q.token} ${esc(q.name)} is thinking…`);
       await sleep(450);
-      const max = level(q).smart ? smartPrice(q, i) : Math.min(cpuValue(q, i) * level(q).bid, q.cash - 40);
+      const max = Math.min((level(q).smart ? smartPrice(q, i) : cpuValue(q, i) * level(q).bid) * persona(q).bid, q.cash - 40);
       if (high + 10 <= max) bid = high + (max - high > 60 && Math.random() < 0.5 ? 20 : 10);
     } else {
       const steps = [1, 10, 50, 100];
@@ -643,6 +702,22 @@ const CPU_LEVELS = {
 };
 const level = (p) => CPU_LEVELS[p.level] || CPU_LEVELS.normal;
 
+// Optional CPU personalities, on top of difficulty. `stations` scales how much it
+// values stations and utilities, `reserve`/`buildReserve` the cash it holds back,
+// `idleCash` how little it thinks of unused cash, `patience` how long it waits
+// before asking about a deal again, `accept` the margin it wants from a trade,
+// `rivals` how much it minds others gaining, `bid` how high it goes at auction.
+const PERSONAS = {
+  steady: { icon: "⚖️", label: "Steady", text: "Plays it by the book." },
+  collector: { icon: "🚂", label: "Collector", text: "Loves stations and utilities.", stations: 2 },
+  developer: { icon: "🏗️", label: "Developer", text: "Builds fast, mortgaging whatever it takes.", buildReserve: 0.5, mortgageToBuild: true },
+  hoarder: { icon: "💰", label: "Hoarder", text: "Sits on a big pile of cash.", reserve: 1.8, buildReserve: 1.8, idleCash: 0 },
+  dealmaker: { icon: "🤝", label: "Dealmaker", text: "Always after a trade, and easier to deal with.", patience: 0.5, accept: -15, rivals: 0.85 },
+  gambler: { icon: "🎲", label: "Gambler", text: "Buys nearly everything and bids high.", reserve: 0.3, bid: 1.2 },
+};
+const PERSONA_DEFAULTS = { stations: 1, reserve: 1, buildReserve: 1, idleCash: 0.3, patience: 1, accept: 0, rivals: 1, bid: 1, mortgageToBuild: false };
+const persona = (p) => ({ ...PERSONA_DEFAULTS, ...PERSONAS[p.persona] });
+
 function cpuValue(p, i) {
   const b = BOARD[i];
   let v = b.price;
@@ -678,10 +753,10 @@ function smartPrice(p, i) {
   const worth = (q, paid) => {
     const after = before.slice();
     after[i] = q.id;
-    return positionValue(q.id, after, q.cash - paid) - positionValue(q.id, before, q.cash);
+    return positionValue(q.id, after, q.cash - paid, persona(p)) - positionValue(q.id, before, q.cash, persona(p));
   };
   const denial = Math.max(0, ...alive().filter((q) => q !== p).map((q) => rivalWeight(p, q) * (worth(q, BOARD[i].price) - BOARD[i].price * 0.2)));
-  let lo = 0, hi = Math.max(0, p.cash - dangerReserve(p));
+  let lo = 0, hi = Math.max(0, p.cash - dangerReserve(p) * persona(p).reserve);
   while (hi - lo > 5) {
     const mid = (lo + hi) / 2;
     if (worth(p, mid) + denial * 0.5 > 0) lo = mid; else hi = mid;
@@ -690,11 +765,11 @@ function smartPrice(p, i) {
 }
 
 function cpuWantsToBuy(p, i) {
-  const price = BOARD[i].price;
+  const price = buyPrice(i);
   if (level(p).smart) return smartPrice(p, i) >= price;
   const keen = cpuValue(p, i) >= price * 1.4;
   const reserve = keen ? 40 : unownedCount() > 14 ? 100 : 180;
-  return p.cash - price >= reserve * level(p).reserve;
+  return p.cash - price >= reserve * level(p).reserve * persona(p).reserve;
 }
 
 function cpuRaiseFunds(p, amount) {
@@ -717,8 +792,8 @@ function cpuRaiseFunds(p, amount) {
 
 async function cpuManage(p) {
   if (p.bankrupt) return;
-  const reserve = level(p).smart ? dangerReserve(p) + 40 : (150 + 20 * alive().length) * level(p).reserve;
-  const smart = level(p).smart;
+  const reserve = (level(p).smart ? dangerReserve(p) + 40 : (150 + 20 * alive().length) * level(p).reserve) * persona(p).buildReserve;
+  const smart = level(p).smart || persona(p).mortgageToBuild;
   const freed = [], built = new Map(), mortgaged = [];
   // Smart CPUs get every set they own up to three houses before anything else.
   const underBuilt = () => S.housesLeft > 0 && ownedBy(p).some((i) => BOARD[i].group && ownsSet(p.id, BOARD[i].group) && S.tiles[i].houses < 3
@@ -730,7 +805,7 @@ async function cpuManage(p) {
   }
   // build evenly, best groups first
   while (true) {
-    let options = ownedBy(p).filter((i) => canBuild(p, i) && p.cash - GROUPS[BOARD[i].group].houseCost >= reserve);
+    let options = ownedBy(p).filter((i) => canBuild(p, i) && p.cash - houseCost(BOARD[i].group) >= reserve);
     if (!options.length && smart && underBuilt()) {
       // Mortgage a property that isn't part of a set to pay for the next house.
       const spare = ownedBy(p).filter((i) => canMortgage(p, i) && !(BOARD[i].group && ownsSet(p.id, BOARD[i].group)));
@@ -763,7 +838,7 @@ const STATION_BONUS = [0, 0, 40, 110, 250];
 // What `pid`'s holdings are worth to them if tile i belonged to owners[i] and
 // they had `cash`. A full set is worth its deeds plus the rent it can earn once
 // built up, which depends on having the cash to build.
-function positionValue(pid, owners, cash) {
+function positionValue(pid, owners, cash, view = PERSONA_DEFAULTS) {
   const deed = (i) => (S.tiles[i].mortgaged ? BOARD[i].price * 0.45 : BOARD[i].price);
   let v = 0, potential = 0, needed = 0;
   for (const [g, tiles] of Object.entries(GROUP_TILES)) {
@@ -784,11 +859,11 @@ function positionValue(pid, owners, cash) {
   }
   v += potential * (0.6 + 0.4 * (needed ? Math.min(1, Math.max(0, cash - 100) / needed) : 1));
   // Running low on cash is risky; cash beyond what building needs earns nothing.
-  v += cash - Math.max(0, 150 - cash) - 0.3 * Math.max(0, cash - needed - 300);
+  v += cash - Math.max(0, 150 - cash) - view.idleCash * Math.max(0, cash - needed - 300);
   for (const type of ["station", "utility"]) {
     const mine = BOARD.map((b, i) => i).filter((i) => BOARD[i].type === type && owners[i] === pid);
-    for (const i of mine) v += deed(i);
-    v += type === "station" ? STATION_BONUS[mine.length] : mine.length === 2 ? 40 : 0;
+    for (const i of mine) v += deed(i) * (1 + (view.stations - 1) * 0.25);
+    v += (type === "station" ? STATION_BONUS[mine.length] : mine.length === 2 ? 40 : 0) * view.stations;
   }
   return v;
 }
@@ -798,7 +873,7 @@ function positionValue(pid, owners, cash) {
 function rivalWeight(p, other) {
   const rivals = alive().filter((q) => q !== p);
   const w = rivals.length <= 1 ? 1 : netWorth(other) >= Math.max(...rivals.map(netWorth)) ? 0.85 : 0.6;
-  return w * level(p).rivals;
+  return w * level(p).rivals * persona(p).rivals;
 }
 
 // Value of a trade to CPU `p`: p gives `give` and gets `get` plus `cashToP`
@@ -809,13 +884,14 @@ function cpuTradeScore(p, other, give, get, cashToP) {
   const after = before.slice();
   for (const i of give) after[i] = other.id;
   for (const i of get) after[i] = p.id;
-  const mine = positionValue(p.id, after, p.cash + cashToP) - positionValue(p.id, before, p.cash);
-  const theirs = positionValue(other.id, after, other.cash - cashToP) - positionValue(other.id, before, other.cash);
+  const view = persona(p);
+  const mine = positionValue(p.id, after, p.cash + cashToP, view) - positionValue(p.id, before, p.cash, view);
+  const theirs = positionValue(other.id, after, other.cash - cashToP, view) - positionValue(other.id, before, other.cash, view);
   return { mine, theirs, score: mine - rivalWeight(p, other) * theirs };
 }
 
 const cpuAccepts = (p, other, give, get, cashToP) =>
-  p.cash + cashToP >= 50 && cpuTradeScore(p, other, give, get, cashToP).score > level(p).accept;
+  p.cash + cashToP >= 50 && cpuTradeScore(p, other, give, get, cashToP).score > level(p).accept + persona(p).accept;
 
 // The cash (from p to other, in £10 steps, possibly negative) that makes the
 // deal just good enough for `other`, or null if no amount in range will do.
@@ -887,13 +963,13 @@ async function cpuTryTrade(p) {
           Math.max(0, Math.floor((p.cash - 200) / 10) * 10), (c) => accept(give, c));
         if (c === null || (!give.length && c <= 0)) continue;
         const { score } = cpuTradeScore(p, other, give, get, -c);
-        if (score > level(p).accept + 15 && (!best || score > best.score)) best = { other, give, get, cash: c, score, k };
+        if (score > level(p).accept + persona(p).accept + 15 && (!best || score > best.score)) best = { other, give, get, cash: c, score, k };
       }
     }
   }
   if (!best) return;
   const { other, give, get, cash } = best;
-  S.tradeAsked[best.k] = S.round + (other.cpu ? 2 : 6);
+  S.tradeAsked[best.k] = S.round + Math.ceil((other.cpu ? 2 : 6) * persona(p).patience);
   const side = (tiles, money) => [...tiles.map((j) => BOARD[j].name), money > 0 ? fmt(money) : ""].filter(Boolean).join(" + ") || "nothing";
   if (!other.cpu) {
     const accepted = await modal({
@@ -1041,7 +1117,7 @@ function openManage(p) {
         <span class="swatch" style="background:${color}">${b.icon || ""}</span>
         <span class="mname">${esc(b.name)}<small>${houses || (t.mortgaged ? "mortgaged" : "")}</small></span>
         <span class="mbtns">${b.type === "property" ? `
-          <button data-act="build" data-i="${i}" ${canBuild(p, i) ? "" : "disabled"} title="Build (${fmt(GROUPS[b.group].houseCost)})">+🏠 ${fmt(GROUPS[b.group].houseCost)}</button>
+          <button data-act="build" data-i="${i}" ${canBuild(p, i) ? "" : "disabled"} title="Build (${fmt(houseCost(b.group))})">+🏠 ${fmt(houseCost(b.group))}</button>
           <button data-act="sell" data-i="${i}" ${canSell(p, i) ? "" : "disabled"} title="Sell for half price">−🏠</button>` : ""}
         ${t.mortgaged
           ? `<button data-act="unmortgage" data-i="${i}" ${canUnmortgage(p, i) ? "" : "disabled"}>Unmortgage ${fmt(unmortgageCost(i))}</button>`
@@ -1093,7 +1169,7 @@ function openTrade(p) {
   modal({
     title: "🤝 Propose a trade",
     wide: true,
-    html: `<label class="trade-with">Trade with <select id="trade-other">${others.map((o) => `<option value="${o.id}">${o.token} ${esc(o.name)}${o.cpu ? ` (CPU · ${level(o).label})` : ""}</option>`).join("")}</select></label>
+    html: `<label class="trade-with">Trade with <select id="trade-other">${others.map((o) => `<option value="${o.id}">${o.token} ${esc(o.name)}${o.cpu ? ` (CPU · ${level(o).label}${o.persona ? ` · ${PERSONAS[o.persona].label}` : ""})` : ""}</option>`).join("")}</select></label>
       <div class="trade-cols">
         <div><h3>You give</h3><div id="trade-give"></div><label class="trade-cash">Cash £<input type="number" id="cash-give" min="0" step="10" value="0"></label></div>
         <div><h3>You get</h3><div id="trade-get"></div><label class="trade-cash">Cash £<input type="number" id="cash-get" min="0" step="10" value="0"></label></div>
@@ -1234,7 +1310,7 @@ function renderPlayers() {
     const props = ownedBy(p);
     return `<div class="player ${p.id === S.turn ? "active" : ""} ${p.bankrupt ? "bankrupt" : ""}" style="--c:${p.color}">
       <div class="phead"><span class="tok" style="--c:${p.color}">${p.token}</span>
-        <span class="pname">${esc(p.name)}${p.cpu ? ` <small>CPU${p.level && p.level !== "normal" ? ` · ${level(p).label}` : ""}</small>` : ""}</span>
+        <span class="pname">${esc(p.name)}${p.cpu ? ` <small>CPU${p.level && p.level !== "normal" ? ` · ${level(p).label}` : ""}</small>` : ""}${p.persona ? ` <small class="persona" title="${esc(PERSONAS[p.persona].text)}">${PERSONAS[p.persona].icon}<span> ${PERSONAS[p.persona].label}</span></small>` : ""}</span>
         <span class="pcash">${p.bankrupt ? "Bankrupt" : fmt(p.cash)}</span></div>
       <div class="pmeta">${p.inJail ? "🚔 In Jail · " : ""}${p.jailCards.length ? `🎫×${p.jailCards.length} · ` : ""}Net worth ${fmt(netWorth(p))}</div>
       <div class="pprops">${props.map((i) => `<span class="chip ${S.tiles[i].mortgaged ? "mort" : ""}" data-i="${i}" title="${esc(BOARD[i].name)}" style="background:${BOARD[i].group ? GROUPS[BOARD[i].group].color : "#ccc"}">${BOARD[i].icon || (S.tiles[i].houses === 5 ? "H" : S.tiles[i].houses || "")}</span>`).join("")}</div>
@@ -1261,6 +1337,9 @@ function renderPrompt() {
   if (human) $("#tools-who").innerHTML = `<span class="tok" style="--c:${p.color}">${p.token}</span>`;
   $("#pot").textContent = S.options.freeParking ? `Free Parking jackpot: ${fmt(S.pot)}` : "";
   $("#round").textContent = `Round ${S.round}`;
+  const e = activeEvent();
+  $("#event").innerHTML = e && e.id !== "quiet" ? `${e.icon} <b>${esc(e.title)}</b>${S.event.group ? `: ${GROUP_NAMES[S.event.group]}` : ""}` : "";
+  $("#event").title = e ? eventText() : "";
 }
 
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -1281,7 +1360,7 @@ function renderLog() {
 
 function openSetup() {
   const rows = DEFAULT_NAMES.slice(0, 4).map((name, k) => ({ name, cpu: k > 0, level: "normal", token: TOKENS[k] }));
-  const opts = { startCash: 1500, auction: true, freeParking: false, speed: "normal" };
+  const opts = { startCash: 1500, auction: true, freeParking: false, events: false, personas: true, speed: "normal" };
   const rowsHtml = () => rows.map((r, k) => `<div class="setup-row" style="--c:${PLAYER_COLORS[k]}">
       <button class="tok tok-pick" data-k="${k}" title="Change token" style="--c:${PLAYER_COLORS[k]}">${r.token}</button>
       <input class="sname" data-k="${k}" value="${esc(r.name)}" maxlength="14" aria-label="Player ${k + 1} name">
@@ -1299,6 +1378,8 @@ function openSetup() {
         <label>CPU speed <select id="o-speed"><option value="slow">Slow</option><option value="normal" selected>Normal</option><option value="fast">Fast</option><option value="instant">Instant</option></select></label>
         <label><input type="checkbox" id="o-auction" checked> Auction unbought property</label>
         <label><input type="checkbox" id="o-fp"> Free Parking jackpot (taxes &amp; fines)</label>
+        <label><input type="checkbox" id="o-events"> Round events (a surprise every round)</label>
+        <label><input type="checkbox" id="o-personas" checked> CPU personalities</label>
       </div>`,
     buttons: [{ label: "Start game", value: true, primary: true }],
     onMount(box) {
@@ -1338,6 +1419,8 @@ function openSetup() {
       box.querySelector("#o-speed").addEventListener("change", (e) => (opts.speed = e.target.value));
       box.querySelector("#o-auction").addEventListener("change", (e) => (opts.auction = e.target.checked));
       box.querySelector("#o-fp").addEventListener("change", (e) => (opts.freeParking = e.target.checked));
+      box.querySelector("#o-events").addEventListener("change", (e) => (opts.events = e.target.checked));
+      box.querySelector("#o-personas").addEventListener("change", (e) => (opts.personas = e.target.checked));
       draw();
     },
   }).then(() => {
@@ -1353,6 +1436,7 @@ function startGame(state, fresh) {
   if (fresh) {
     S.turn = Math.floor(Math.random() * S.players.length);
     log(`New game! ${P(S.turn).name} goes first.`, null, true);
+    for (const p of S.players.filter((p) => p.persona)) log(`${PERSONAS[p.persona].icon} ${p.name} is a ${PERSONAS[p.persona].label}: ${PERSONAS[p.persona].text}`, p);
   } else {
     log("Game resumed.", null, true);
   }
