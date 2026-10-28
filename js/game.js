@@ -1671,9 +1671,20 @@ function renderLog() {
 
 // ---------------------------------------------------------------- setup screen
 
+// The new-game screen remembers its players and options, so a trip to Career or
+// Scenarios (or the next game) starts from the same setup.
+const SETUP_KEY = "web-monopoly-setup";
+
 function openSetup() {
-  const rows = DEFAULT_NAMES.slice(0, 4).map((name, k) => ({ name, cpu: k > 0, level: "normal", token: TOKENS[k] }));
-  const opts = { startCash: 1500, auction: true, freeParking: false, events: false, personas: true, chatter: true, speed: "normal" };
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(SETUP_KEY)); } catch (e) { /* storage unavailable */ }
+  const rows = Array.isArray(draft?.rows) && draft.rows.length >= 2 ? draft.rows
+    : DEFAULT_NAMES.slice(0, 4).map((name, k) => ({ name, cpu: k > 0, level: "normal", token: TOKENS[k] }));
+  const opts = { startCash: 1500, auction: true, freeParking: false, events: false, personas: true, chatter: true, speed: "normal", ...draft?.opts };
+  const saveDraft = () => {
+    try { localStorage.setItem(SETUP_KEY, JSON.stringify({ rows, opts })); } catch (e) { /* storage unavailable */ }
+  };
+  const on = (v) => (v ? "checked" : "");
   const rowsHtml = () => rows.map((r, k) => `<div class="setup-row" style="--c:${PLAYER_COLORS[k]}">
       <button class="tok tok-pick" data-k="${k}" title="Change token" style="--c:${PLAYER_COLORS[k]}">${r.token}</button>
       <input class="sname" data-k="${k}" value="${esc(r.name)}" maxlength="14" aria-label="Player ${k + 1} name">
@@ -1688,13 +1699,13 @@ function openSetup() {
       <div id="setup-rows"></div>
       <button id="add-player" class="ghost">+ Add player</button>
       <div class="setup-opts">
-        <label>Starting cash <select id="o-cash"><option>1000</option><option selected>1500</option><option>2000</option></select></label>
-        <label>CPU speed <select id="o-speed"><option value="slow">Slow</option><option value="normal" selected>Normal</option><option value="fast">Fast</option><option value="instant">Instant</option></select></label>
-        <label><input type="checkbox" id="o-auction" checked> Auction unbought property</label>
-        <label><input type="checkbox" id="o-fp"> Free Parking jackpot (taxes &amp; fines)</label>
-        <label><input type="checkbox" id="o-events"> Round events (a surprise every round)</label>
-        <label><input type="checkbox" id="o-personas" checked> CPU personalities</label>
-        <label><input type="checkbox" id="o-chatter" checked> CPU chatter</label>
+        <label>Starting cash <select id="o-cash">${[1000, 1500, 2000].map((c) => `<option ${opts.startCash === c ? "selected" : ""}>${c}</option>`).join("")}</select></label>
+        <label>CPU speed <select id="o-speed">${Object.keys(SPEEDS).map((v) => `<option value="${v}" ${opts.speed === v ? "selected" : ""}>${v[0].toUpperCase() + v.slice(1)}</option>`).join("")}</select></label>
+        <label><input type="checkbox" id="o-auction" ${on(opts.auction)}> Auction unbought property</label>
+        <label><input type="checkbox" id="o-fp" ${on(opts.freeParking)}> Free Parking jackpot (taxes &amp; fines)</label>
+        <label><input type="checkbox" id="o-events" ${on(opts.events)}> Round events (a surprise every round)</label>
+        <label><input type="checkbox" id="o-personas" ${on(opts.personas)}> CPU personalities</label>
+        <label><input type="checkbox" id="o-chatter" ${on(opts.chatter)}> CPU chatter</label>
       </div>`,
     buttons: [{ label: "Start game", value: true, primary: true }],
     onMount(box, close) {
@@ -1743,6 +1754,7 @@ function openSetup() {
     },
   }).then((mode) => {
     rows.forEach((r, k) => (r.name = r.name.trim() || `Player ${k + 1}`));
+    saveDraft();
     if (mode !== true) return openSoloMode(mode, rows.find((r) => !r.cpu)?.name);
     startGame(newState({ players: rows, options: opts }), true);
   });
