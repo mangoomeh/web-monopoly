@@ -325,7 +325,8 @@ function chat(p, kind, chance = 0.5, vars = {}, lines = null) {
   p.lastLine = raw;
   p.chatRound = S.round;
   const text = raw.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? "friend");
-  p.bubble = { text, until: Date.now() + 4500 };
+  // Cards are redrawn often; `since` lets only the first drawing animate in.
+  p.bubble = { text, since: Date.now(), until: Date.now() + 4500 };
   log(`💬 ${p.name}: “${text}”`, p);
   renderPlayers();
   setTimeout(renderPlayers, 4600);

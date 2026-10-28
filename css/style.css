@@ -741,8 +741,8 @@ kbd { background: #eee; border: 1px solid #bbb; border-radius: 4px; padding: 0 4
   font-style: italic;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
   z-index: 4;
-  animation: bubble-in 0.2s ease-out;
 }
+.bubble.fresh { animation: bubble-in 0.2s ease-out; }
 @keyframes bubble-in { from { opacity: 0; transform: translateY(4px); } }
 
 .feat .medal { font-size: 0.95em; }

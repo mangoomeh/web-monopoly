@@ -895,13 +895,14 @@ function wireChart(box) {
 // How difficulty changes a CPU's play. `rivals` scales how much it minds a trade
 // helping the other side; `reserve` scales the cash it holds back when buying and
 // building; `bid` scales how high it goes at auction; `accept` is the margin a
-// trade must give it; easy CPUs never start trades. Hard CPUs (`smart`) size
+// trade must give it; `setCaution` is the least weight it gives a rival's gain
+// when a deal completes a colour set for them; easy CPUs never start trades. Hard CPUs (`smart`) size
 // their cash reserve to the rent they could land on, price property by what it
 // does for their position and for rivals', and build where rent pays back best.
 const CPU_LEVELS = {
-  easy: { label: "Easy", rivals: 0.35, reserve: 2, bid: 0.75, accept: 0, noProposals: true },
-  normal: { label: "Normal", rivals: 1, reserve: 1, bid: 1, accept: 25 },
-  hard: { label: "Hard", rivals: 1.15, reserve: 1, bid: 1, accept: 40, smart: true },
+  easy: { label: "Easy", rivals: 0.35, setCaution: 1, reserve: 2, bid: 0.75, accept: 0, noProposals: true },
+  normal: { label: "Normal", rivals: 1, setCaution: 1.15, reserve: 1, bid: 1, accept: 25 },
+  hard: { label: "Hard", rivals: 1.15, setCaution: 1.3, reserve: 1, bid: 1, accept: 40, smart: true },
 };
 const level = (p) => CPU_LEVELS[p.level] || CPU_LEVELS.normal;
 
@@ -1102,7 +1103,11 @@ function cpuTradeScore(p, other, give, get, cashToP) {
   const view = persona(p);
   const mine = positionValue(p.id, after, p.cash + cashToP, view) - positionValue(p.id, before, p.cash, view) + cards;
   const theirs = positionValue(other.id, after, other.cash - cashToP, view) - positionValue(other.id, before, other.cash, view) - cards;
-  return { mine, theirs, score: mine - rivalWeight(p, other) * theirs };
+  // Handing a rival a whole colour set is how games are lost: unless we complete
+  // one of our own in the same deal, their gain counts (at least) in full.
+  const completes = (pid) => Object.keys(GROUP_TILES).some((g) => GROUP_TILES[g].every((i) => after[i] === pid) && !GROUP_TILES[g].every((i) => before[i] === pid));
+  const weight = completes(other.id) && !completes(p.id) ? Math.max(rivalWeight(p, other), level(p).setCaution) : rivalWeight(p, other);
+  return { mine, theirs, score: mine - weight * theirs };
 }
 
 const cpuAccepts = (p, other, give, get, cashToP) =>
@@ -1167,7 +1172,8 @@ async function cpuTryTrade(p) {
       const gives = [[], ...myTiles.filter((j) => !get.some((g) => BOARD[g].group && BOARD[g].group === BOARD[j].group)).map((j) => [j])];
       for (const g of Object.keys(GROUP_TILES)) {
         const ours = GROUP_TILES[g].filter((j) => S.tiles[j].owner === p.id);
-        if (ours.length > 1 && ours.every((j) => myTiles.includes(j)) && GROUP_TILES[g].every((j) => ours.includes(j) || S.tiles[j].owner === other.id)) gives.push(ours);
+        const theirs = GROUP_TILES[g].filter((j) => S.tiles[j].owner === other.id);
+        if (ours.length > 1 && theirs.length && ours.every((j) => myTiles.includes(j)) && GROUP_TILES[g].every((j) => ours.includes(j) || theirs.includes(j))) gives.push(ours);
       }
       for (const d of p.jailCards) gives.push([`jail:${d}`]);
       const accept = other.cpu
@@ -1683,7 +1689,7 @@ function renderPlayers() {
       <div class="phead"><span class="tok" style="--c:${p.color}">${p.token}</span>
         <span class="pname">${esc(p.name)}${p.cpu ? ` <small>CPU${p.level && p.level !== "normal" ? ` · ${level(p).label}` : ""}</small>` : ""}${p.persona ? ` <small class="persona" title="${esc(PERSONAS[p.persona].text)}">${PERSONAS[p.persona].icon}<span> ${PERSONAS[p.persona].label}</span></small>` : ""}</span>
         <span class="pcash">${p.bankrupt ? "Bankrupt" : fmt(p.cash)}</span></div>
-      ${p.bubble && p.bubble.until > Date.now() ? `<div class="bubble">${esc(p.bubble.text)}</div>` : ""}
+      ${p.bubble && p.bubble.until > Date.now() ? `<div class="bubble ${Date.now() - (p.bubble.since || 0) < 250 ? "fresh" : ""}">${esc(p.bubble.text)}</div>` : ""}
       <div class="pmeta">${p.inJail ? "🚔 In Jail · " : ""}${p.jailCards.length ? `🎫×${p.jailCards.length} · ` : ""}Net worth ${fmt(netWorth(p))}</div>
       <div class="pprops">${props.map((i) => `<span class="chip ${S.tiles[i].mortgaged ? "mort" : ""}" data-i="${i}" title="${esc(BOARD[i].name)}" style="background:${BOARD[i].group ? GROUPS[BOARD[i].group].color : "#ccc"}">${BOARD[i].icon || (S.tiles[i].houses === 5 ? "H" : S.tiles[i].houses || "")}</span>`).join("")}</div>
     </div>`;

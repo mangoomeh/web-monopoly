@@ -33,6 +33,13 @@ run(`
   await check("won't spend its last £190 on a property", () => ok(`
     setup(2, { cash: [1000, 200], own: { 0: ["Strand"] }, cpus: [false, true] });
     return !cpuAccepts(P(1), P(0), [], [tile("Strand")], -190);`));
+  await check("won't sell a whole colour set it owns", () => ok(`
+    setup(2, { cash: [1500, 1500], own: { 0: ["Bow", "Marlborough", "Vine"], 1: ["Electric"] } });
+    cpuTryTrade(P(0));
+    return [16, 18, 19].every((i) => S.tiles[i].owner === 0);`));
+  await check("in a 4-player game, won't sell a set's last piece cheaply", () => ok(`
+    setup(4, { cash: [1500, 1500, 1500, 1500], own: { 0: ["Bow", "Marlborough"], 1: ["Vine"] } });
+    return !cpuAccepts(P(1), P(0), [tile("Vine")], [], 300) && !cpuAccepts(P(1), P(0), [tile("Vine")], [], 450);`));
   await check("a counter-offer is a deal the CPU then accepts", () => ok(`
     setup(2, { cash: [1500, 1500], own: { 0: ["Bow", "Marlborough", "Strand"], 1: ["Vine"] }, cpus: [false, true] });
     const c = cpuCounterOffer(P(1), P(0), [], [tile("Vine")], 100);
