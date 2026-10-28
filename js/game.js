@@ -116,6 +116,18 @@ function baseRent(i, diceTotal, cardMode) {
   return 0;
 }
 
+// Running game stats for the end screen (created lazily so old saves still load).
+function stats() {
+  if (!S.stats) S.stats = { history: [], rentGot: S.players.map(() => 0), biggestRent: null, trades: [] };
+  return S.stats;
+}
+function recordWorth(final = false) {
+  const h = stats().history;
+  const point = { round: S.round, final, worth: S.players.map((p) => (p.bankrupt ? 0 : netWorth(p))) };
+  if (!final && h.length && h[h.length - 1].round === S.round) h[h.length - 1] = point;
+  else h.push(point);
+}
+
 function netWorth(p) {
   let worth = p.cash;
   for (const i of ownedBy(p)) {
@@ -336,6 +348,7 @@ async function rollDice() {
 async function gameLoop() {
   while (!S.over) {
     if (alive().length <= 1) return showWinner();
+    if (stats().history.at(-1)?.round !== S.round) recordWorth();
     if (S.round === 5 && !S.hinted) {
       S.hinted = true;
       log("🎩 Rumour has it the dice are ticklish… try a few quick taps.");
@@ -499,7 +512,12 @@ async function landOn(p, diceTotal, cardMode) {
     if (!rent) return log(`${activeEvent()?.icon || ""} No rent due on ${b.name} this round.`, p);
     log(`${p.name} owes ${owner.name} ${fmt(rent)} rent for ${b.name}.`, p);
     if (!p.cpu) await showInfo(p, `You landed on <b>${esc(b.name)}</b>, owned by ${esc(owner.name)}. Rent: <b>${fmt(rent)}</b>.`);
-    if (await pay(p, rent, owner)) toast(`${p.name} paid ${owner.name} ${fmt(rent)}`);
+    if (await pay(p, rent, owner)) {
+      toast(`${p.name} paid ${owner.name} ${fmt(rent)}`);
+      const st = stats();
+      st.rentGot[owner.id] += rent;
+      if (!st.biggestRent || rent > st.biggestRent.amount) st.biggestRent = { amount: rent, payer: p.id, owner: owner.id, tile: i, round: S.round };
+    }
     return;
   }
   switch (b.type) {
@@ -675,12 +693,16 @@ async function showWinner() {
   log(`🏆 ${w.name} wins the game!`, w, true);
   setStatus(`🏆 <b>${esc(w.name)}</b> wins!`);
   S.over = true;
+  recordWorth(true);
   render();
-  const results = `<ol class="standings">${ranked.map((p) => `<li><span class="tok" style="--c:${p.color}">${p.token}</span> ${esc(p.name)} <span>${p.bankrupt ? "bankrupt" : fmt(netWorth(p))}</span></li>`).join("")}</ol>`;
+  const results = `<ol class="standings">${ranked.map((p) => `<li><span class="tok" style="--c:${p.color}">${p.token}</span> ${esc(p.name)} <span>${p.bankrupt ? "bankrupt" : fmt(netWorth(p))}</span></li>`).join("")}</ol>
+    ${statsHtml()}`;
   // Players can close the results to look over the final board and the game log.
   let again = await modal({
     title: `🏆 ${esc(w.name)} wins!`,
     html: results,
+    wide: true,
+    onMount: wireChart,
     buttons: [{ label: "View board & log", value: false }, { label: "New game", value: true, primary: true }],
   });
   while (!again) {
@@ -689,10 +711,104 @@ async function showWinner() {
       { label: "New game", value: "new", primary: true },
     ])) === "new";
     if (!again) {
-      again = await modal({ title: `🏆 ${esc(w.name)} wins!`, html: results, buttons: [{ label: "Close", value: false }, { label: "New game", value: true, primary: true }] });
+      again = await modal({ title: `🏆 ${esc(w.name)} wins!`, html: results, wide: true, onMount: wireChart, buttons: [{ label: "Close", value: false }, { label: "New game", value: true, primary: true }] });
     }
   }
   location.reload();
+}
+
+// ---------------------------------------------------------------- end-of-game stats
+
+// Player colours as chart lines: yellow and orange are darkened a step so the
+// lines stay legible on the cream panel (validated for colour-blind separation).
+const chartColor = (p) => ({ "#fdd835": "#e0a800", "#fb8c00": "#ef7d00" })[p.color] || p.color;
+const shortMoney = (v) => (v >= 1000 ? `£${(v / 1000).toFixed(v % 1000 ? 1 : 0)}k` : `£${v}`);
+
+function chartGeom() {
+  const h = stats().history;
+  const W = 560, H = 220, L = 46, R = 30, T = 12, B = 24;
+  const raw = Math.max(100, ...h.flatMap((pt) => pt.worth));
+  const step = [100, 250, 500, 1000, 2500, 5000, 10000].find((s) => raw / s <= 4) || 25000;
+  const top = Math.ceil(raw / step) * step;
+  const x = (k) => L + (h.length > 1 ? (k * (W - L - R)) / (h.length - 1) : (W - L - R) / 2);
+  const y = (v) => T + (H - T - B) * (1 - v / top);
+  return { h, W, H, L, R, T, B, top, step, x, y };
+}
+
+function statsHtml() {
+  const st = stats(), g = chartGeom(), h = g.h;
+  const label = (pt) => (pt.final ? "End" : `R${pt.round}`);
+  let svg = "";
+  for (let v = 0; v <= g.top; v += g.step) {
+    svg += `<line class="grid" x1="${g.L}" x2="${g.W - g.R}" y1="${g.y(v)}" y2="${g.y(v)}"/><text class="axis" x="${g.L - 6}" y="${g.y(v) + 4}" text-anchor="end">${shortMoney(v)}</text>`;
+  }
+  const every = Math.max(1, Math.ceil(h.length / 7));
+  h.forEach((pt, k) => {
+    if (k % every === 0 || k === h.length - 1) svg += `<text class="axis" x="${g.x(k)}" y="${g.H - 6}" text-anchor="middle">${label(pt)}</text>`;
+  });
+  // One line per player; their token at the end of the line names it.
+  const ends = [];
+  for (const p of S.players) {
+    const d = h.map((pt, k) => `${k ? "L" : "M"}${g.x(k).toFixed(1)},${g.y(pt.worth[p.id]).toFixed(1)}`).join("");
+    svg += `<path d="${d}" fill="none" stroke="${chartColor(p)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = h[h.length - 1].worth[p.id];
+    svg += `<circle cx="${g.x(h.length - 1)}" cy="${g.y(last)}" r="4" fill="${chartColor(p)}" stroke="var(--panel)" stroke-width="2"/>`;
+    ends.push({ p, y: g.y(last) });
+  }
+  ends.sort((a, b) => a.y - b.y);
+  for (let k = 1; k < ends.length; k++) ends[k].y = Math.max(ends[k].y, ends[k - 1].y + 14);
+  for (const e of ends) svg += `<text x="${g.x(h.length - 1) + 8}" y="${e.y + 5}" font-size="13">${e.p.token}</text>`;
+  svg += `<line class="crosshair" y1="${g.T}" y2="${g.H - g.B}" visibility="hidden"/><rect class="hit" x="${g.L}" y="0" width="${g.W - g.L - g.R}" height="${g.H}" fill="transparent"/>`;
+
+  const legend = S.players.map((p) => `<span><i style="background:${chartColor(p)}"></i>${p.token} ${esc(p.name)}</span>`).join("");
+  const table = `<table class="chart-table"><tr><th>Round</th>${S.players.map((p) => `<th>${p.token} ${esc(p.name)}</th>`).join("")}</tr>
+    ${h.map((pt) => `<tr><td>${pt.final ? "End" : pt.round}</td>${pt.worth.map((v) => `<td>${fmt(v)}</td>`).join("")}</tr>`).join("")}</table>`;
+
+  const facts = [`🎲 ${S.round} round${S.round > 1 ? "s" : ""} played`];
+  const topRent = Math.max(...st.rentGot);
+  if (topRent > 0) {
+    const r = P(st.rentGot.indexOf(topRent));
+    facts.push(`🏠 Most rent collected: <b>${esc(r.name)}</b>, ${fmt(topRent)}`);
+  }
+  if (st.biggestRent) {
+    const b = st.biggestRent;
+    facts.push(`💥 Biggest single rent: <b>${esc(P(b.payer).name)}</b> paid ${esc(P(b.owner).name)} ${fmt(b.amount)} on ${esc(BOARD[b.tile].name)} (round ${b.round})`);
+  }
+  facts.push(st.trades.length
+    ? `🤝 ${st.trades.length} trade${st.trades.length > 1 ? "s" : ""}<details><summary>Show trades</summary><ul>${st.trades.map((t) => `<li>Round ${t.round}: ${esc(t.text)}</li>`).join("")}</ul></details>`
+    : "🤝 No trades this game");
+
+  return `<h3 class="stats-head">Net worth over the game</h3>
+    <div class="chart-legend">${legend}</div>
+    <div class="stats-chart"><svg viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="Net worth of each player by round">${svg}</svg><div class="chart-tip" hidden></div></div>
+    <details class="chart-table-wrap"><summary>Show as a table</summary>${table}</details>
+    <ul class="stat-facts">${facts.map((f) => `<li>${f}</li>`).join("")}</ul>`;
+}
+
+// Hover / tap on the chart: a crosshair and every player's net worth at that point.
+function wireChart(box) {
+  const svg = box.querySelector(".stats-chart svg");
+  if (!svg) return;
+  const g = chartGeom(), tip = box.querySelector(".chart-tip"), cross = svg.querySelector(".crosshair");
+  const show = (e) => {
+    const pt = svg.createSVGPoint();
+    [pt.x, pt.y] = [e.clientX, e.clientY];
+    const at = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const k = g.h.length > 1 ? Math.max(0, Math.min(g.h.length - 1, Math.round(((at.x - g.L) * (g.h.length - 1)) / (g.W - g.L - g.R)))) : 0;
+    const point = g.h[k];
+    cross.setAttribute("x1", g.x(k));
+    cross.setAttribute("x2", g.x(k));
+    cross.setAttribute("visibility", "visible");
+    const rows = S.players.map((p) => ({ p, v: point.worth[p.id] })).sort((a, b) => b.v - a.v);
+    tip.innerHTML = `<b>${point.final ? "End of game" : `Round ${point.round}`}</b>${rows.map((r) => `<div><i style="background:${chartColor(r.p)}"></i>${r.p.token} ${esc(r.p.name)}<span>${fmt(r.v)}</span></div>`).join("")}`;
+    tip.hidden = false;
+    const left = (g.x(k) / g.W) * svg.clientWidth;
+    tip.style.left = `${Math.min(Math.max(left, 70), svg.clientWidth - 70)}px`;
+  };
+  const hide = () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); };
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  svg.addEventListener("pointerleave", hide);
 }
 
 // ---------------------------------------------------------------- CPU logic
@@ -1003,6 +1119,7 @@ async function cpuTryTrade(p) {
   p.cash -= cash;
   other.cash += cash;
   log(`🤝 ${p.name} traded with ${other.name}: gave ${side(give, cash)}, got ${side(get, -cash)}.`, p, true);
+  stats().trades.push({ round: S.round, text: `${p.name} gave ${other.name} ${side(give, cash)} for ${side(get, -cash)}` });
   toast(`${p.name} traded for ${get.map((j) => BOARD[j].name).join(", ")}`);
   if (other.cpu) await announce(`🤝 ${esc(other.name)} accepted. ${esc(p.name)} now owns ${esc(get.map((j) => BOARD[j].name).join(", "))}.`, 1800);
   render();
@@ -1194,22 +1311,37 @@ function openManage(p) {
     }).join("")}</div>
     <p class="small">Build evenly across a full colour set. Bank stock: ${S.housesLeft} houses, ${S.hotelsLeft} hotels.</p>`;
   };
+  // Each change made here can be undone until the window is closed.
+  const undo = [];
+  const snapshot = () => ({ tiles: S.tiles.map((t) => ({ ...t })), cash: p.cash, houses: S.housesLeft, hotels: S.hotelsLeft, log: S.log.slice() });
   modal({
     title: `${p.token} ${esc(p.name)} — ${'<span id="manage-cash"></span>'}`,
-    html: `<div id="manage-rows"></div>`,
+    html: `<div id="manage-rows"></div><button id="manage-undo" class="ghost" disabled>↶ Undo</button>`,
     buttons: [{ label: "Done", value: true, primary: true }],
     wide: true,
     onMount(box) {
       const refresh = () => {
         box.querySelector("#manage-rows").innerHTML = rowsHtml();
         box.querySelector("#manage-cash").textContent = fmt(p.cash);
+        const u = box.querySelector("#manage-undo");
+        u.disabled = !undo.length;
+        u.textContent = undo.length ? `↶ Undo ${undo[undo.length - 1].what}` : "↶ Undo";
         render();
       };
       box.addEventListener("click", (e) => {
+        if (e.target.closest("#manage-undo")) {
+          const snap = undo.pop();
+          if (!snap) return;
+          S.tiles.forEach((t, k) => Object.assign(t, snap.tiles[k]));
+          [p.cash, S.housesLeft, S.hotelsLeft, S.log] = [snap.cash, snap.houses, snap.hotels, snap.log];
+          renderLog();
+          return refresh();
+        }
         const btn = e.target.closest("button[data-act]");
         if (!btn) return;
-        const i = +btn.dataset.i;
-        ({ build, sell, mortgage, unmortgage })[btn.dataset.act](p, i);
+        const i = +btn.dataset.i, act = btn.dataset.act;
+        undo.push({ ...snapshot(), what: { build: "build", sell: "sale", mortgage: "mortgage", unmortgage: "unmortgage" }[act] + ` on ${BOARD[i].name}` });
+        ({ build, sell, mortgage, unmortgage })[act](p, i);
         refresh();
       });
       refresh();
@@ -1259,7 +1391,7 @@ function openTrade(p) {
       <div class="trade-cols">
         <div><h3>You give</h3><div id="trade-give"></div><label class="trade-cash">Cash £<input type="number" id="cash-give" min="0" step="10" value="0"></label></div>
         <div><h3>You get</h3><div id="trade-get"></div><label class="trade-cash">Cash £<input type="number" id="cash-get" min="0" step="10" value="0"></label></div>
-      </div><p id="trade-msg" class="trade-msg"></p>`,
+      </div><p id="trade-hint" class="trade-hint"></p><p id="trade-msg" class="trade-msg"></p>`,
     buttons: [
       { label: "Cancel", value: false },
       { label: "Propose", value: true, primary: true, onClick: () => { proposeTrade(); return false; } },
@@ -1271,14 +1403,33 @@ function openTrade(p) {
         box.querySelector("#cash-give").max = p.cash;
         box.querySelector("#cash-get").max = other.cash;
       };
-      box.querySelector("#trade-other").addEventListener("change", (e) => { other = P(+e.target.value); fill(); });
+      const readForm = () => ({
+        give: [...box.querySelectorAll('input[data-side="give"]:checked')].map((x) => parseItem(x.value)),
+        get: [...box.querySelectorAll('input[data-side="get"]:checked')].map((x) => parseItem(x.value)),
+        cashGive: Math.max(0, Math.floor(+box.querySelector("#cash-give").value || 0)),
+        cashGet: Math.max(0, Math.floor(+box.querySelector("#cash-get").value || 0)),
+      });
+      // Live read on whether a CPU would take the deal as it stands.
+      const hint = () => {
+        const el = box.querySelector("#trade-hint");
+        const { give, get, cashGive, cashGet } = readForm();
+        if (!other.cpu || (!give.length && !get.length && !cashGive && !cashGet) || cashGive > p.cash || cashGet > other.cash) return (el.textContent = "");
+        const net = cashGive - cashGet, ok = (c) => cpuAccepts(other, p, get, give, c);
+        if (ok(net)) {
+          const less = cheapestCash(-Math.max(0, Math.floor((other.cash - 50) / 10) * 10), net, ok);
+          el.textContent = `✅ ${other.name} would accept this${less !== null && net - less >= 20 ? ` (you could offer ${fmt(net - less)} less)` : ""}.`;
+        } else {
+          const c = cheapestCash(net, Math.floor(p.cash / 10) * 10, ok);
+          el.textContent = c !== null ? `🤔 ${other.name} would want about ${fmt(c - net)} more.` : `❌ ${other.name} isn't interested on these terms.`;
+        }
+      };
+      box.querySelector(".trade-cols").addEventListener("input", hint);
+      box.querySelector(".trade-cols").addEventListener("change", hint);
+      box.querySelector("#trade-other").addEventListener("change", (e) => { other = P(+e.target.value); fill(); hint(); });
       fill();
       proposeTrade = async () => {
         const msg = box.querySelector("#trade-msg");
-        const give = [...box.querySelectorAll('input[data-side="give"]:checked')].map((x) => parseItem(x.value));
-        const get = [...box.querySelectorAll('input[data-side="get"]:checked')].map((x) => parseItem(x.value));
-        const cashGive = Math.max(0, Math.floor(+box.querySelector("#cash-give").value || 0));
-        const cashGet = Math.max(0, Math.floor(+box.querySelector("#cash-get").value || 0));
+        const { give, get, cashGive, cashGet } = readForm();
         if (!give.length && !get.length && !cashGive && !cashGet) return (msg.textContent = "Add something to the trade.");
         if (cashGive > p.cash) return (msg.textContent = `You only have ${fmt(p.cash)}.`);
         if (cashGet > other.cash) return (msg.textContent = `${other.name} only has ${fmt(other.cash)}.`);
@@ -1296,6 +1447,7 @@ function openTrade(p) {
             msg.innerHTML = `${esc(other.name)} declines, but counters: you give <b>${side(c.give, c.cash)}</b>, you get <b>${side(c.get, -c.cash)}</b>.
               <button class="primary counter-yes">Agree</button> <span class="small">or change it and propose again.</span>`;
             msg.querySelector(".counter-yes").addEventListener("click", () => proposeTrade());
+            hint();
             return;
           }
         } else {
@@ -1313,7 +1465,10 @@ function openTrade(p) {
         p.cash += cashGet - cashGive;
         other.cash += cashGive - cashGet;
         const names = (l) => l.map(itemName).join(", ");
-        log(`🤝 ${p.name} traded with ${other.name}: gave ${[names(give), cashGive ? fmt(cashGive) : ""].filter(Boolean).join(" + ") || "nothing"}, got ${[names(get), cashGet ? fmt(cashGet) : ""].filter(Boolean).join(" + ") || "nothing"}.`, p);
+        const gave = [names(give), cashGive ? fmt(cashGive) : ""].filter(Boolean).join(" + ") || "nothing";
+        const got = [names(get), cashGet ? fmt(cashGet) : ""].filter(Boolean).join(" + ") || "nothing";
+        log(`🤝 ${p.name} traded with ${other.name}: gave ${gave}, got ${got}.`, p);
+        stats().trades.push({ round: S.round, text: `${p.name} gave ${other.name} ${gave} for ${got}` });
         toast("Trade completed!");
         close(true);
         render();
@@ -1351,6 +1506,7 @@ function buildBoard() {
       ${b.price ? `<div class="tprice">${fmt(b.price)}</div>` : b.amount ? `<div class="tprice">Pay ${fmt(b.amount)}</div>` : ""}
       ${i === 0 ? '<div class="tprice">Collect £200</div>' : ""}
       <div class="owner-strip"></div>
+      <div class="rent-tag"></div>
       <div class="tokens"></div>`;
     if (isBuyable(i)) el.addEventListener("click", () => modal({ title: esc(b.name), html: deedHtml(i), buttons: [{ label: "Close", value: true }] }));
     board.appendChild(el);
@@ -1367,10 +1523,40 @@ function render() {
   renderLog();
 }
 
+// The human about to roll, if any: their reachable squares get highlighted.
+function rollerUp() {
+  const p = pending?.p;
+  return p && !p.cpu && !p.inJail && pending.actions.some((a) => a.value === "roll") ? p : null;
+}
+
+// What landing on tile i with dice total `roll` would cost p: [label, worrying?].
+function landingCost(p, i, roll) {
+  const b = BOARD[i], t = S.tiles[i];
+  if (b.type === "gotojail") return ["Jail", true];
+  if (b.type === "tax") return eventIs("taxfree") ? null : [fmt(b.amount), b.amount > p.cash * 0.3];
+  if (!isBuyable(i) || t.owner === null || t.owner === p.id || t.mortgaged) return null;
+  const rent = rentFor(i, roll);
+  return rent ? [fmt(rent), rent >= 150 || rent > p.cash * 0.3] : null;
+}
+
 function renderTiles() {
+  const roller = rollerUp();
+  const reach = new Map();
+  if (roller) for (let r = 2; r <= 12; r++) reach.set((roller.pos + r) % 40, r);
   document.querySelectorAll("#board .tile").forEach((el) => {
     const i = +el.dataset.i, t = S.tiles[i];
+    el.classList.toggle("reach", reach.has(i));
+    const tag = el.querySelector(".rent-tag");
+    const cost = reach.has(i) ? landingCost(roller, i, reach.get(i)) : null;
+    tag.textContent = cost ? cost[0] : "";
+    tag.classList.toggle("danger", !!cost?.[1]);
     if (!isBuyable(i)) return;
+    // Hover summary, so the deed card is only needed for the full rent table.
+    const b = BOARD[i], o = t.owner !== null ? P(t.owner) : null;
+    const rent = b.type === "utility" ? `${countType(t.owner, "utility") === 2 ? 10 : 4}× dice` : fmt(rentFor(i, 0));
+    el.title = o
+      ? `${b.name} · owned by ${o.name}${t.mortgaged ? " · mortgaged, no rent" : ` · rent ${rent}`}${t.houses ? ` · ${t.houses === 5 ? "hotel" : `${t.houses} house${t.houses > 1 ? "s" : ""}`}` : ""}`
+      : `${b.name} · for sale, ${fmt(buyPrice(i))}`;
     const strip = el.querySelector(".owner-strip");
     const owner = t.owner !== null ? P(t.owner) : null;
     strip.style.background = owner ? owner.color : "transparent";
