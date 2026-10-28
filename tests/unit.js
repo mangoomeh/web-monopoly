@@ -92,6 +92,27 @@ run(`
     return run(`P(0).cash === 1550 && !P(0).inJail`);
   });
 
+  await check("market crash pays 20% less to mortgage", () => ok(`
+    setup(2, { options: { events: true }, own: { 0: ["Mayfair"] } }); P(0).cash = 0;
+    S.event = { id: "crash" }; mortgage(P(0), 39);
+    return P(0).cash === 160;`));
+  await check("charity drive: the richest gives £100 to the poorest", async () => {
+    run(`setup(3, { options: { events: true }, cash: [900, 300, 1200] }); S.decks.events = [EVENTS.findIndex((e) => e.id === "charity")]; S.eventRound = 0;`);
+    await run(`startRoundEvent()`);
+    return run(`P(2).cash === 1100 && P(1).cash === 400 && P(0).cash === 900`);
+  });
+  await check("lucky streak pays £50 for doubles, roadworks moves one square less", async () => {
+    run(`setup(2, { options: { events: true } }); S.event = { id: "lucky" };
+      let rolls = [[3, 3], [1, 2]]; rollDice = async () => (S.dice = rolls.shift());
+      landOn = async () => {}; endTurn = async () => {}; P(0).pos = 0; P(0).cash = 1000;`);
+    await run(`playTurn(P(0))`);
+    const lucky = run(`P(0).cash === 1050 && P(0).pos === 9`);
+    run(`S.event = { id: "roadworks" }; rolls = [[2, 3]]; P(0).pos = 0;`);
+    await run(`playTurn(P(0))`);
+    assert(lucky, "lucky streak");
+    return run(`P(0).pos === 4 && stepsFor(5) === 4`);
+  });
+
   console.log("Daily challenge");
   const deal = (seed) => run(`(() => {
     const st = newState({ seed: ${seed}, players: [human("Me"), cpuRow(1, "normal"), cpuRow(2, "hard"), cpuRow(3, "normal")], options: { personas: true, startCash: 1500 } });

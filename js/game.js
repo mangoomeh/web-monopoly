@@ -103,6 +103,9 @@ const discounted = (amount) => Math.ceil((amount * 0.75) / 5) * 5;
 const houseCost = (group) => (eventIs("boom") ? discounted(GROUPS[group].houseCost) : GROUPS[group].houseCost);
 const buyPrice = (i) => (eventIs("sale") ? discounted(BOARD[i].price) : BOARD[i].price);
 const goSalary = () => (eventIs("payday") ? 300 : RULES.goSalary);
+const mortgageValue = (i) => (eventIs("crash") ? BOARD[i].price * 0.4 : BOARD[i].price / 2);
+// How far a dice total moves you (roadworks hold everyone back a square).
+const stepsFor = (roll) => roll - (eventIs("roadworks") ? 1 : 0);
 
 function eventRentFactor(i) {
   const b = BOARD[i];
@@ -162,7 +165,7 @@ function liquidValue(p) {
   for (const i of ownedBy(p)) {
     const b = BOARD[i], t = S.tiles[i];
     if (t.houses) v += (t.houses * GROUPS[b.group].houseCost) / 2;
-    if (!t.mortgaged) v += b.price / 2;
+    if (!t.mortgaged) v += mortgageValue(i);
   }
   return v;
 }
@@ -243,8 +246,9 @@ function canMortgage(p, i) {
 
 function mortgage(p, i) {
   S.tiles[i].mortgaged = true;
-  p.cash += BOARD[i].price / 2;
-  log(`${p.name} mortgaged ${BOARD[i].name} for ${fmt(BOARD[i].price / 2)}.`, p);
+  const value = mortgageValue(i);
+  p.cash += value;
+  log(`${p.name} mortgaged ${BOARD[i].name} for ${fmt(value)}${eventIs("crash") ? " (market crash)" : ""}.`, p);
 }
 
 const canUnmortgage = (p, i) => S.tiles[i].owner === p.id && S.tiles[i].mortgaged && p.cash >= unmortgageCost(i);
@@ -446,7 +450,11 @@ async function playTurn(p) {
       sendToJail(p);
       break;
     }
-    await moveSteps(p, a + b);
+    if (double && eventIs("lucky")) {
+      p.cash += 50;
+      log(`🍀 Lucky streak: ${p.name} collects ${fmt(50)} for rolling doubles.`, p);
+    }
+    await moveSteps(p, stepsFor(a + b));
     await landOn(p, a + b);
     if (p.bankrupt || p.inJail || !double) break;
   }
@@ -485,6 +493,14 @@ async function startRoundEvent() {
   if (alive().some((p) => !p.cpu)) await ask({ cpu: true }, "", [{ label: "OK", value: true, primary: true }], html, 6000);
   else await announce(html, 2500);
   if (e.id === "dividend") for (const p of alive()) p.cash += 50;
+  if (e.id === "charity") {
+    const byCash = alive().slice().sort((x, y) => y.cash - x.cash);
+    const [rich, poor] = [byCash[0], byCash[byCash.length - 1]];
+    if (rich !== poor) {
+      log(`💝 ${rich.name} gives ${fmt(100)} to ${poor.name}.`, rich);
+      await pay(rich, 100, poor);
+    }
+  }
   if (e.id === "amnesty") for (const p of alive().filter((p) => p.inJail)) { p.inJail = false; log(`🔓 ${p.name} walks out of Jail.`, p); }
   if (e.id === "rates") {
     for (const p of alive()) {
@@ -546,7 +562,7 @@ async function jailTurn(p) {
   }
   p.inJail = false;
   render();
-  await moveSteps(p, a + b);
+  await moveSteps(p, stepsFor(a + b));
   await landOn(p, a + b);
   return "done";
 }
@@ -924,7 +940,7 @@ function cpuValue(p, i) {
 function dangerReserve(p) {
   let expected = 0, worst = 0;
   for (let roll = 2; roll <= 12; roll++) {
-    const i = (p.pos + roll) % 40, t = S.tiles[i];
+    const i = (p.pos + stepsFor(roll)) % 40, t = S.tiles[i];
     if (!isBuyable(i) || t.owner === null || t.owner === p.id) continue;
     const rent = rentFor(i, roll);
     expected += rent * (6 - Math.abs(7 - roll)) / 36;
@@ -1372,7 +1388,7 @@ function openManage(p) {
           <button data-act="sell" data-i="${i}" ${canSell(p, i) ? "" : "disabled"} title="${t.houses ? (canSell(p, i) ? `Sell for ${fmt(GROUPS[b.group].houseCost / 2)}` : "Sell evenly: sell from the others first") : "No houses to sell"}">−🏠</button>` : ""}
         ${t.mortgaged
           ? `<button data-act="unmortgage" data-i="${i}" ${canUnmortgage(p, i) ? "" : "disabled"}>Unmortgage ${fmt(unmortgageCost(i))}</button>`
-          : `<button data-act="mortgage" data-i="${i}" ${canMortgage(p, i) ? "" : "disabled"} title="${mortgageNote}">Mortgage +${fmt(b.price / 2)}</button>`}</span>
+          : `<button data-act="mortgage" data-i="${i}" ${canMortgage(p, i) ? "" : "disabled"} title="${mortgageNote}">Mortgage +${fmt(mortgageValue(i))}</button>`}</span>
       </div>`;
     }).join("")}</div>
     <p class="small">Build evenly across a full colour set. Bank stock: ${S.housesLeft} houses, ${S.hotelsLeft} hotels.</p>`;
@@ -1610,7 +1626,7 @@ function landingCost(p, i, roll) {
 function renderTiles() {
   const roller = rollerUp();
   const reach = new Map();
-  if (roller) for (let r = 2; r <= 12; r++) reach.set((roller.pos + r) % 40, r);
+  if (roller) for (let r = 2; r <= 12; r++) reach.set((roller.pos + stepsFor(r)) % 40, r);
   document.querySelectorAll("#board .tile").forEach((el) => {
     const i = +el.dataset.i, t = S.tiles[i];
     el.classList.toggle("reach", reach.has(i));

@@ -142,4 +142,8 @@ const EVENTS = [
   { id: "dividend", icon: "📈", title: "Bank dividend", text: "Every player receives £50 now." },
   { id: "rates", icon: "🧾", title: "Council rates", text: "Every player pays £10 now for each property they own." },
   { id: "amnesty", icon: "🔓", title: "Jail amnesty", text: "Everyone in Jail is released now." },
+  { id: "crash", icon: "📉", title: "Market crash", text: "Mortgaging pays 20% less this round." },
+  { id: "charity", icon: "💝", title: "Charity drive", text: "The player with the most cash gives £100 to the one with the least." },
+  { id: "lucky", icon: "🍀", title: "Lucky streak", text: "Rolling doubles pays £50 this round." },
+  { id: "roadworks", icon: "🚧", title: "Roadworks", text: "Everyone moves one square less this round." },
 ];

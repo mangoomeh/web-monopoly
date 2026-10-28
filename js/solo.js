@@ -274,6 +274,10 @@ const EVENT_CHATTER = {
   dividend: ["Free money! I love the bank.", "Fifty quid, lovely."],
   rates: ["Council rates? Again?", "Who's paying for all these potholes, anyway?"],
   amnesty: ["Jail amnesty! Everyone out!", "Freedom for all!"],
+  crash: ["Sell! Sell! Oh wait, nobody's buying.", "Worst possible time to need a mortgage."],
+  charity: ["How generous of you, {rich}.", "Charity begins at the top, apparently."],
+  lucky: ["Come on, doubles!", "Feeling lucky. Very lucky."],
+  roadworks: ["Roadworks again? Every single year.", "One square less? Fine by me, actually."],
 };
 
 const BIG_MOMENTS = ["start", "bankrupt", "declined", "jackpot", "payRentHuge", "win", "congrats"];
@@ -357,7 +361,8 @@ function onGameEvent(kind, d) {
     case "event": {
       const lines = EVENT_CHATTER[d.id];
       const cpus = alive().filter((p) => p.cpu);
-      if (lines && cpus.length) chat(cpus[Math.floor(Math.random() * cpus.length)], "event", 0.6, { group: GROUP_NAMES[S.event?.group] || "" }, lines);
+      const rich = alive().slice().sort((x, y) => y.cash - x.cash)[0];
+      if (lines && cpus.length) chat(cpus[Math.floor(Math.random() * cpus.length)], "event", 0.6, { group: GROUP_NAMES[S.event?.group] || "", rich: rich?.name }, lines);
       return;
     }
     case "set": {
