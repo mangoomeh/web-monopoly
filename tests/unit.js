@@ -113,6 +113,36 @@ run(`
     return run(`P(0).pos === 4 && stepsFor(5) === 4`);
   });
 
+  console.log("CPUs and events");
+  const builtWith = (eventId) => ok(`
+    setup(2, { options: { events: true }, own: { 0: ["Old Kent", "Whitechapel"] } });
+    P(0).cash = 450; S.event = ${eventId ? `{ id: "${eventId}" }` : "null"};
+    cpuManage(P(0)); return S.tiles[1].houses + S.tiles[3].houses;`);
+  await check("Normal CPUs build more during a building boom", async () => {
+    const [plain, boom] = [await builtWith(null), await builtWith("boom")];
+    assert(boom > plain, `built ${plain} normally, ${boom} in the boom`);
+  });
+  await check("Hard CPUs don't mortgage to build during a market crash", async () => {
+    const mortgagedTo = (eventId) => ok(`
+      setup(2, { options: { events: true }, own: { 0: ["Old Kent", "Whitechapel", "Mayfair"] } });
+      P(0).level = "hard"; P(0).cash = 100; S.event = ${eventId ? `{ id: "${eventId}" }` : "null"};
+      cpuManage(P(0)); return S.tiles[39].mortgaged;`);
+    assert(await mortgagedTo(null), "should mortgage Mayfair to build normally");
+    return !(await mortgagedTo("crash"));
+  });
+  await check("Normal CPUs keep more cash back when an event makes rents ahead dearer", () => ok(`
+    setup(2, { options: { events: true }, own: { 1: ["Pall Mall", "Whitehall", "Northumberland"] } });
+    [11, 13, 14].forEach((i) => (S.tiles[i].houses = 3)); P(0).pos = 7;
+    S.event = { id: "quiet" }; const calm = eventCaution(P(0));
+    S.event = { id: "hot", group: "pink" }; const hot = eventCaution(P(0));
+    P(0).level = "easy"; const easy = eventCaution(P(0));
+    return calm === 0 && hot > 100 && easy === 0;`));
+  await check("raising cash, the hot street set is mortgaged last", () => ok(`
+    setup(2, { options: { events: true }, own: { 0: ["Strand", "Old Kent"] } });
+    S.event = { id: "hot", group: "red" }; P(0).cash = 0;
+    cpuRaiseFunds(P(0), 20);
+    return S.tiles[1].mortgaged && !S.tiles[21].mortgaged;`));
+
   console.log("Daily challenge");
   const deal = (seed) => run(`(() => {
     const st = newState({ seed: ${seed}, players: [human("Me"), cpuRow(1, "normal"), cpuRow(2, "hard"), cpuRow(3, "normal")], options: { personas: true, startCash: 1500 } });

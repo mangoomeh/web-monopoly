@@ -937,12 +937,12 @@ function cpuValue(p, i) {
 }
 
 // Cash worth keeping back against the rent p could land on with its next roll.
-function dangerReserve(p) {
+function dangerReserve(p, withEvent = true) {
   let expected = 0, worst = 0;
   for (let roll = 2; roll <= 12; roll++) {
-    const i = (p.pos + stepsFor(roll)) % 40, t = S.tiles[i];
+    const i = (p.pos + (withEvent ? stepsFor(roll) : roll)) % 40, t = S.tiles[i];
     if (!isBuyable(i) || t.owner === null || t.owner === p.id) continue;
-    const rent = rentFor(i, roll);
+    const rent = withEvent ? rentFor(i, roll) : baseRent(i, roll);
     expected += rent * (6 - Math.abs(7 - roll)) / 36;
     worst = Math.max(worst, rent);
   }
@@ -967,20 +967,26 @@ function smartPrice(p, i) {
   return Math.floor(lo / 10) * 10;
 }
 
+// Extra cash a Normal CPU keeps back because this round's event makes the
+// squares ahead dearer (Hard CPUs already reckon with the real rents; Easy ones don't).
+const eventCaution = (p) => (p.level === "normal" && activeEvent() ? Math.max(0, dangerReserve(p) - dangerReserve(p, false)) : 0);
+
 function cpuWantsToBuy(p, i) {
   const price = buyPrice(i);
   if (level(p).smart) return smartPrice(p, i) >= price;
   const keen = cpuValue(p, i) >= price * 1.4;
   const reserve = keen ? 40 : unownedCount() > 14 ? 100 : 180;
-  return p.cash - price >= reserve * level(p).reserve * persona(p).reserve;
+  return p.cash - price >= reserve * level(p).reserve * persona(p).reserve + eventCaution(p);
 }
 
 function cpuRaiseFunds(p, amount) {
-  const mortgageables = () => ownedBy(p).filter((i) => canMortgage(p, i));
+  // During a hot street, the set earning double rent is the last thing to mortgage.
+  const hot = (i) => eventIs("hot") && BOARD[i].group === S.event.group;
+  const mortgageables = () => ownedBy(p).filter((i) => canMortgage(p, i)).sort((a, b) => hot(a) - hot(b));
   while (p.cash < amount) {
     // 1. mortgage things that aren't part of a full set
     let m = mortgageables().filter((i) => !BOARD[i].group || !ownsSet(p.id, BOARD[i].group));
-    if (m.length) { m.sort((a, b) => BOARD[a].price - BOARD[b].price); mortgage(p, m[0]); continue; }
+    if (m.length) { m.sort((a, b) => hot(a) - hot(b) || BOARD[a].price - BOARD[b].price); mortgage(p, m[0]); continue; }
     // 2. sell buildings
     const s = ownedBy(p).filter((i) => canSell(p, i));
     if (s.length) { s.sort((a, b) => S.tiles[b].houses - S.tiles[a].houses); sell(p, s[0]); continue; }
@@ -995,8 +1001,11 @@ function cpuRaiseFunds(p, amount) {
 
 async function cpuManage(p) {
   if (p.bankrupt) return;
-  const reserve = (level(p).smart ? dangerReserve(p) + 40 : (150 + 20 * alive().length) * level(p).reserve) * persona(p).buildReserve;
-  const smart = level(p).smart || persona(p).mortgageToBuild;
+  let reserve = (level(p).smart ? dangerReserve(p) + 40 : (150 + 20 * alive().length) * level(p).reserve) * persona(p).buildReserve + eventCaution(p);
+  // A building boom is the time to build: Normal and Hard CPUs dig deeper.
+  if (eventIs("boom") && p.level !== "easy") reserve *= 0.6;
+  // No mortgaging to build during a market crash; it pays out less.
+  const smart = (level(p).smart || persona(p).mortgageToBuild) && !eventIs("crash");
   const freed = [], built = new Map(), mortgaged = [];
   // Smart CPUs get every set they own up to three houses before anything else.
   const underBuilt = () => S.housesLeft > 0 && ownedBy(p).some((i) => BOARD[i].group && ownsSet(p.id, BOARD[i].group) && S.tiles[i].houses < 3
