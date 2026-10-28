@@ -328,6 +328,9 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 #prompt { display: flex; flex-direction: column; align-items: center; gap: 0.8em; max-width: 92%; }
 .prompt-msg { line-height: 1.45; }
 .prompt-actions { display: flex; flex-wrap: wrap; gap: 0.5em; justify-content: center; }
+.reach-note { font-size: 0.78em; color: var(--muted); margin-top: 0.4em; }
+.reach-note i { display: inline-block; width: 0.9em; height: 0.9em; vertical-align: -0.1em; border: 2px solid rgba(240, 180, 0, 0.9); border-radius: 2px; }
+.reach-note b { color: #c62828; }
 .prompt-actions button { font-size: 1em; }
 .prompt-card { width: min(100%, 300px); }
 
@@ -630,6 +633,8 @@ kbd { background: #eee; border: 1px solid #bbb; border-radius: 4px; padding: 0 4
   .pmeta, .pprops { margin-left: 0; }
   .pmeta { font-size: 0.72em; }
   .chip { width: 16px; height: 16px; font-size: 9px; }
+  /* Speech sits inside the speaker's own card, not over the neighbouring ones. */
+  .player .bubble { position: static; display: block; max-width: none; margin-top: 4px; border-radius: 8px; box-shadow: none; padding: 2px 8px; }
   /* Pinned to the top edge of the control dock rather than over the board. */
   #dock #toast { position: absolute; top: 0; bottom: auto; font-size: 0.85em; padding: 6px 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform: translate(-50%, -50%) scale(0.9); }
   #dock #toast.show { transform: translate(-50%, -50%); }

@@ -1706,7 +1706,8 @@ function renderPrompt() {
         const dis = typeof a.disabled === "function" ? a.disabled() : a.disabled;
         const auto = pending.timeout && k === 0 ? `auto" style="--t:${pending.timeout}ms` : "";
         return `<button data-k="${k}" class="${a.primary ? "primary" : ""} ${a.danger ? "danger" : ""} ${auto}" ${dis ? "disabled" : ""}>${a.label}</button>`;
-      }).join("")}</div>`;
+      }).join("")}</div>
+      ${rollerUp() ? `<div class="reach-note"><i></i> Outlined: where this roll could land you · <b>red</b> = costly</div>` : ""}`;
   } else {
     el.innerHTML = `<div class="prompt-msg">${S.status || ""}</div>`;
   }
