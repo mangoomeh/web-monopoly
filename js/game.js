@@ -976,14 +976,33 @@ const eventCaution = (p) => (p.level === "normal" && activeEvent() ? Math.max(0,
 // completes one of its sets or stops a rival completing theirs. (Without this,
 // Hard CPUs bid each other up to 2-4x list for property that changes nothing.)
 function auctionCap(p, i) {
+  return BOARD[i].price * (decisive(p, i, [i]) ? 2 : 1.25);
+}
+
+// Whether getting tile i (along with the rest of `get`, while handing over
+// `give`) completes one of p's sets, or stops one rival completing theirs.
+function decisive(p, i, get, give = []) {
   const b = BOARD[i];
-  let decisive = false;
+  const owner = (j) => (get.includes(j) ? p.id : give.includes(j) ? null : S.tiles[j].owner);
   if (b.group) {
-    const others = GROUP_TILES[b.group].filter((j) => j !== i);
-    const owners = new Set(others.map((j) => S.tiles[j].owner));
-    decisive = owners.size === 1 && !owners.has(null);
-  } else if (b.type === "station") decisive = countType(p.id, "station") === 3 || alive().some((q) => q !== p && countType(q.id, "station") === 3);
-  return b.price * (decisive ? 2 : 1.25);
+    const tiles = GROUP_TILES[b.group];
+    if (tiles.every((j) => owner(j) === p.id)) return true;
+    const rest = tiles.filter((j) => !get.includes(j)).map((j) => S.tiles[j].owner);
+    return rest.length > 0 && rest.every((o) => o !== null && o !== p.id && o === rest[0]);
+  }
+  if (b.type === "station") {
+    const stations = BOARD.map((x, j) => j).filter((j) => BOARD[j].type === "station");
+    return stations.every((j) => owner(j) === p.id) || alive().some((q) => q !== p && countType(q.id, "station") === 3 && !give.some((j) => !isCard(j) && BOARD[j].type === "station"));
+  }
+  return false;
+}
+
+// The most a CPU will hand over (cash plus what it gives, at list price) for
+// `get`: list price, or up to double for property that completes a set of its
+// own or blocks a rival's. Stops players buying at list and selling on at a
+// profit, or slipping an item into the deal to get round the limit.
+function purchaseCap(p, get, give = []) {
+  return get.reduce((t, i) => t + (isCard(i) ? 50 : BOARD[i].price * (decisive(p, i, get, give) ? 2 : 1)), 0);
 }
 
 function cpuWantsToBuy(p, i) {
@@ -1126,10 +1145,9 @@ function cpuTradeScore(p, other, give, get, cashToP) {
   return { mine, theirs, score: mine - weight * theirs };
 }
 
-// When a CPU simply buys property for cash, it pays no more than it would bid
-// at auction (otherwise players could buy at list and sell straight on at a profit).
+// Whether a deal where the CPU pays cash costs it more than `purchaseCap` allows.
 const overpays = (p, give, get, cashToP) =>
-  !give.length && cashToP < 0 && -cashToP > get.reduce((t, i) => t + (isCard(i) ? 50 : auctionCap(p, i)), 0);
+  cashToP < 0 && -cashToP + give.reduce((t, i) => t + (isCard(i) ? 50 : BOARD[i].price), 0) > purchaseCap(p, get, give);
 const cpuAccepts = (p, other, give, get, cashToP) =>
   p.cash + cashToP >= 50 && !overpays(p, give, get, cashToP) && cpuTradeScore(p, other, give, get, cashToP).score > level(p).accept + persona(p).accept;
 
@@ -1203,7 +1221,7 @@ async function cpuTryTrade(p) {
       for (const give of gives) {
         const c = cheapestCash(-Math.max(0, Math.floor((other.cash - 100) / 10) * 10),
           Math.max(0, Math.floor((p.cash - 200) / 10) * 10), (c) => accept(give, c));
-        if (c === null || (!give.length && c <= 0)) continue;
+        if (c === null || (!give.length && c <= 0) || overpays(p, give, get, -c)) continue;
         const { score } = cpuTradeScore(p, other, give, get, -c);
         if (score > level(p).accept + persona(p).accept + 15 && (!best || score > best.score)) best = { other, give, get, cash: c, score, k };
       }

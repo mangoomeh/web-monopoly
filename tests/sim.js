@@ -56,7 +56,18 @@ async function playGame(table, seed) {
     tick();
   });
   const crashed = loop.then(() => "ended", (e) => { throw e; });
-  const how = await Promise.race([finished, capped, crashed]);
+  // A game that stops making progress (an endless loop, or a crash the loop swallowed) fails fast.
+  let lastRound = -1, idle = 0;
+  const stuck = new Promise((resolve, reject) => {
+    const watch = setInterval(() => {
+      if (over) return clearInterval(watch);
+      const r = g.run("S.round");
+      idle = r === lastRound ? idle + 1 : 0;
+      lastRound = r;
+      if (idle >= 20) { clearInterval(watch); over = true; reject(new Error("game stuck in round " + r)); }
+    }, 500);
+  });
+  const how = await Promise.race([finished, capped, crashed, stuck]);
   over = true;
   g.run(`S.over = true`); // stops the game loop if it's still going
   const winner = g.run(`S.players.slice().sort((a, b) => (a.bankrupt - b.bankrupt) || netWorth(b) - netWorth(a))[0].level`);

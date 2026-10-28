@@ -53,7 +53,21 @@ run(`
   await check("won't overpay for a station you're flipping", () => ok(`
     setup(4, { cpus: [false, true, true, true], own: { 0: ["King's Cross"], 1: ["Marylebone"] } });
     P(1).persona = "collector";
-    return cpuAccepts(P(1), P(0), [], [5], -250) && !cpuAccepts(P(1), P(0), [], [5], -300);`));
+    return cpuAccepts(P(1), P(0), [], [5], -200) && !cpuAccepts(P(1), P(0), [], [5], -250);`));
+  await check("...even with something of theirs slipped into the deal", () => ok(`
+    setup(4, { cpus: [false, true, true, true], own: { 0: ["Whitehall", "Northumberland"], 1: ["Pall Mall", "Trafalgar"] } });
+    P(1).level = "hard";
+    const pinks = [tile("Whitehall"), tile("Northumberland")];
+    return !cpuAccepts(P(1), P(0), [tile("Trafalgar")], pinks, -420) && purchaseCap(P(1), pinks) === 600;`));
+  await check("won't pay to swap sides of a set it can't complete", () => ok(`
+    setup(4, { cpus: [false, true, true, true], own: { 0: ["Leicester", "Coventry"], 1: ["Piccadilly"] } });
+    P(1).level = "hard"; P(1).persona = "dealmaker";
+    return !cpuAccepts(P(1), P(0), [tile("Piccadilly")], [tile("Leicester"), tile("Coventry")], -320);`));
+  await check("a deal where the CPU adds a Get Out of Jail Free card and cash is judged without errors", () => ok(`
+    setup(4, { cpus: [false, true, true, true], own: { 0: ["King's Cross"], 1: ["Marylebone", "Fenchurch", "Liverpool"] } });
+    P(1).jailCards = ["chance"];
+    cpuAccepts(P(1), P(0), ["jail:chance"], [5], -100);
+    return typeof overpays(P(1), ["jail:chance"], [5], -100) === "boolean";`));
   await check("the brown set isn't sold cheaply", () => ok(`
     setup(4, { cpus: [false, true, true, true], own: { 0: ["Old Kent"], 1: ["Whitechapel"] } });
     P(1).level = "hard";
