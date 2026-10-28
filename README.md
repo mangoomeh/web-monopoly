@@ -30,12 +30,27 @@ Open `index.html` in a browser, or serve the folder:
 python3 -m http.server
 ```
 
+## Testing
+The game itself needs no build, but there's a test suite (Node 18+):
+```
+npm install
+npm test                         # rules & CPU checks, plus simulated CPU-only games
+npx playwright install chromium  # once
+npm run test:browser             # walks through the real page, desktop and phone sized
+```
+- `tests/unit.js`: focused checks of rules, round events, CPU trade decisions, the daily challenge's seeding and the career record.
+- `tests/sim.js`: plays seeded CPU-only games and checks invariants after every turn (house/hotel stock, no negative cash, even building, Jail cards). `GAMES=40 node tests/sim.js` runs more and prints who won.
+- `tests/browser.js`: setup, a few turns, rent preview, trade hint, undo, results chart and the daily challenge, with no page errors.
+
+GitHub Actions runs all three on every push (`.github/workflows/test.yml`).
+
 ## Project layout
 - `index.html` – page shell
 - `css/style.css` – board and UI styling
 - `js/data.js` – board spaces, cards, rules constants
 - `js/game.js` – game engine, CPU logic and rendering
 - `js/solo.js` – single-player extras: career & achievements, daily challenge, scenarios, CPU chatter
+- `tests/` – headless test suite (see Testing)
 - `manifest.webmanifest`, `sw.js`, `icons/` – PWA install & offline support (bump `CACHE` in `sw.js` when shipping changes)
 
 ## History

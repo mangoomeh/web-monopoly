@@ -202,13 +202,29 @@ function canSell(p, i) {
 function sell(p, i) {
   const t = S.tiles[i], cost = GROUPS[BOARD[i].group].houseCost;
   let refund;
-  if (t.houses === 5) {
-    // A hotel breaks back down into four houses, if the bank has them.
-    const back = Math.min(4, S.housesLeft);
+  if (t.houses === 5 && S.housesLeft < 4) {
+    // The bank can't break the hotel into four houses, so to keep building even
+    // the whole set comes down to the highest level the bank's houses allow.
+    // (With a hotel in the set, every site holds four houses or a hotel.)
+    const set = GROUP_TILES[BOARD[i].group];
+    const hotels = set.filter((j) => S.tiles[j].houses === 5).length, fours = set.length - hotels;
+    let level = 4;
+    while (level > 0 && hotels * level - fours * (4 - level) > S.housesLeft) level--;
+    let units = 0;
+    for (const j of set) {
+      units += S.tiles[j].houses - level;
+      if (S.tiles[j].houses === 5) S.hotelsLeft++;
+      S.tiles[j].houses = level;
+    }
+    S.housesLeft -= hotels * level - fours * (4 - level);
+    refund = (units * cost) / 2;
+    log(`The bank is short of houses, so ${p.name} sold ${GROUP_NAMES[BOARD[i].group]} down to ${level} house${level === 1 ? "" : "s"} each for ${fmt(refund)}.`, p);
+  } else if (t.houses === 5) {
+    // A hotel breaks back down into four houses.
     S.hotelsLeft++;
-    S.housesLeft -= back;
-    refund = ((5 - back) * cost) / 2;
-    t.houses = back;
+    S.housesLeft -= 4;
+    refund = cost / 2;
+    t.houses = 4;
     log(`${p.name} sold the hotel on ${BOARD[i].name} for ${fmt(refund)}.`, p);
   } else {
     S.housesLeft++;
@@ -249,7 +265,10 @@ async function pay(p, amount, creditor, toPot = false) {
   if (p.cash < amount) {
     const before = p.cash;
     const raised = p.cpu ? cpuRaiseFunds(p, amount) : await humanRaiseFunds(p, amount, creditor);
-    if (p.cpu && p.cash > before) await announce(`${p.token} <b>${esc(p.name)}</b> raised ${fmt(p.cash - before)} by mortgaging or selling houses to pay ${fmt(amount)}.`);
+    if (p.cpu && p.cash > before) {
+      hook("raised", { p, amount });
+      await announce(`${p.token} <b>${esc(p.name)}</b> raised ${fmt(p.cash - before)} by mortgaging or selling houses to pay ${fmt(amount)}.`);
+    }
     if (!raised) {
       await goBankrupt(p, creditor);
       return false;
@@ -325,6 +344,7 @@ async function moveSteps(p, steps) {
       const salary = goSalary();
       p.cash += salary;
       log(`${p.name} passed GO and collected ${fmt(salary)}.`, p);
+      hook("go", { p });
     }
     renderTokens();
     renderPlayers();
@@ -420,6 +440,7 @@ async function playTurn(p) {
     const [a, b] = await rollDice();
     const double = a === b;
     log(`${p.name} rolled ${a} + ${b} = ${a + b}${double ? " (doubles)" : ""}.`, p);
+    if (double && S.doubles < 2) hook("doubles", { p });
     if (double && ++S.doubles === 3) {
       log(`${p.name} rolled three doubles in a row!`, p);
       sendToJail(p);
@@ -458,6 +479,7 @@ async function startRoundEvent() {
     S.event.group = pick(pool);
   }
   log(`${e.icon} Round ${S.round} event — ${e.title}: ${eventText()}`, null, true);
+  if (e.id !== "quiet") hook("event", { id: e.id });
   const html = eventHtml();
   if (e.id === "quiet") return render();
   if (alive().some((p) => !p.cpu)) await ask({ cpu: true }, "", [{ label: "OK", value: true, primary: true }], html, 6000);
@@ -499,12 +521,14 @@ async function jailTurn(p) {
     S.decks[deck].push(deck === "chance" ? CHANCE_JAIL_CARD : CHEST_JAIL_CARD);
     p.inJail = false;
     log(`${p.name} used a Get Out of Jail Free card.`, p);
+    hook("freed", { p });
     return "free";
   }
   if (choice === "pay") {
     if (!(await pay(p, RULES.jailFine, null, true))) return "done";
     p.inJail = false;
     log(`${p.name} paid ${fmt(RULES.jailFine)} to get out of Jail.`, p);
+    hook("freed", { p });
     return "free";
   }
   const [a, b] = await rollDice();
@@ -518,6 +542,7 @@ async function jailTurn(p) {
     if (!(await pay(p, RULES.jailFine, null, true))) return "done";
   } else {
     log(`Doubles! ${p.name} is out of Jail.`, p);
+    hook("freed", { p });
   }
   p.inJail = false;
   render();
@@ -531,9 +556,12 @@ async function landOn(p, diceTotal, cardMode) {
   render();
   if (isBuyable(i)) {
     if (t.owner === null) return offerToBuy(p, i);
-    if (t.owner === p.id) return;
+    if (t.owner === p.id) return hook("landOwn", { p, i });
     const owner = P(t.owner);
-    if (t.mortgaged) return log(`${b.name} is mortgaged — no rent due.`, p);
+    if (t.mortgaged) {
+      hook("landMortgaged", { p, owner, i });
+      return log(`${b.name} is mortgaged — no rent due.`, p);
+    }
     const rent = rentFor(i, diceTotal, cardMode);
     if (!rent) return log(`${activeEvent()?.icon || ""} No rent due on ${b.name} this round.`, p);
     log(`${p.name} owes ${owner.name} ${fmt(rent)} rent for ${b.name}.`, p);
@@ -552,6 +580,7 @@ async function landOn(p, diceTotal, cardMode) {
       if (eventIs("taxfree")) return log(`🎉 Tax holiday: ${p.name} pays no ${b.name}.`, p);
       log(`${p.name} pays ${b.name} of ${fmt(b.amount)}.`, p);
       if (!p.cpu) await showInfo(p, `<b>${b.name}</b>: pay ${fmt(b.amount)}.`);
+      hook("tax", { p });
       await pay(p, b.amount, null, true);
       return;
     case "chance":
@@ -565,6 +594,7 @@ async function landOn(p, diceTotal, cardMode) {
       if (S.options.freeParking && S.pot > 0) {
         log(`${p.name} collects the Free Parking jackpot of ${fmt(S.pot)}!`, p);
         toast(`${p.name} wins the ${fmt(S.pot)} jackpot!`);
+        hook("jackpot", { p, amount: S.pot });
         p.cash += S.pot;
         S.pot = 0;
         render();
@@ -581,6 +611,9 @@ async function drawCard(p, deck, diceTotal) {
   else S.decks[deck].push(idx);
   log(`${p.name} drew ${deck === "chance" ? "Chance" : "Community Chest"}: “${card.text}”`, p);
   await showInfo(p, cardHtml(deck, card.text), true);
+  const good = card.action === "collectEach" || card.action === "jailFree" || (card.action === "money" && card.amount > 0) || (card.action === "move" && card.to === 0);
+  const bad = ["repairs", "payEach", "jail", "moveBack"].includes(card.action) || (card.action === "money" && card.amount < 0);
+  if (good || bad) hook("card", { p, good, deck, action: card.action });
 
   switch (card.action) {
     case "money":
@@ -707,6 +740,7 @@ async function auction(i, starter) {
     leader.cash -= high;
     S.tiles[i].owner = leader.id;
     log(`🔨 ${leader.name} won ${b.name} at auction for ${fmt(high)}.`, leader);
+    hook("auction", { p: leader, price: high, i });
     toast(`${leader.name} won ${b.name} for ${fmt(high)}`);
   } else {
     log(`Nobody bid on ${b.name}; it stays with the bank.`);
@@ -1769,6 +1803,7 @@ function startGame(state, fresh) {
     S.turn = Math.floor(rand() * S.players.length);
     log(`New game! ${P(S.turn).name} goes first.`, null, true);
     for (const p of S.players.filter((p) => p.persona)) log(`${PERSONAS[p.persona].icon} ${p.name} is a ${PERSONAS[p.persona].label}: ${PERSONAS[p.persona].text}`, p);
+    hook("start", {});
   } else {
     log("Game resumed.", null, true);
   }

@@ -111,7 +111,7 @@ function watchBoard() {
   for (const p of S.players) {
     const known = S.knownSets[p.id];
     S.knownSets[p.id] = sets[p.id];
-    if (known && p.cpu && !p.bankrupt && sets[p.id].some((g) => !known.includes(g))) chat(p, "set", 1);
+    if (known && !p.bankrupt && sets[p.id].some((g) => !known.includes(g))) onGameEvent("set", { p });
   }
   const me = soloHuman();
   if (!me || S.over || me.bankrupt) return;
@@ -129,88 +129,246 @@ function watchBoard() {
 
 // ---------------------------------------------------------------- CPU chatter
 
-// Lines by moment, then by personality (falling back to `any`). {name} is the other player.
+// Lines by moment, then by personality (falling back to `any`). {name} is the
+// other player, {deck} the card deck, {tile} the property.
 const CHATTER = {
+  start: {
+    any: ["Good luck, everyone. You'll need it.", "May the best tycoon win.", "Let's make some money!", "I've got a good feeling about this one.", "Nobody touch my stations."],
+    gambler: ["Feeling lucky today!", "Big risks, big rewards. Let's go!"],
+    hoarder: ["Remember: a penny saved is a penny earned.", "I'll just hold on to my money, thanks."],
+    collector: ["I'm here for the railways, mostly.", "All aboard!"],
+    developer: ["I can already see the hotels.", "Let's build something beautiful."],
+    dealmaker: ["My door is always open, {name}.", "Everything's negotiable, friends."],
+  },
   buy: {
-    any: ["Don't mind if I do.", "Mine now.", "A sound investment."],
-    gambler: ["Why not? Let's roll!", "Fortune favours the bold!", "I'll take it — I'll take everything!"],
-    hoarder: ["Fine… but only because it's a bargain.", "There goes my rainy-day fund."],
-    collector: ["Another one for the collection!", "Ooh, shiny."],
-    developer: ["Can't build on nothing.", "Future hotel site, right here."],
+    any: ["Don't mind if I do.", "Mine now.", "A sound investment.", "I'll take {tile}, thank you.", "That's going straight in the portfolio.", "Lovely spot, {tile}.", "Sold, to me!"],
+    gambler: ["Why not? Let's roll!", "Fortune favours the bold!", "I'll take it — I'll take everything!", "Who needs savings?"],
+    hoarder: ["Fine… but only because it's a bargain.", "There goes my rainy-day fund.", "I checked the price three times."],
+    collector: ["Another one for the collection!", "Ooh, shiny.", "It'll look lovely next to my others."],
+    developer: ["Can't build on nothing.", "Future hotel site, right here.", "I can see the scaffolding already."],
+    dealmaker: ["Something to bargain with later.", "Good leverage, this."],
+  },
+  auction: {
+    any: ["Going, going… gone. To me!", "Outbid you all.", "Worth every penny. Probably.", "The gavel has spoken."],
+    gambler: ["Bidding wars are the best wars!", "I'd have paid double."],
+    hoarder: ["I may have got carried away there.", "My wallet is weeping."],
+  },
+  payRentSmall: {
+    any: ["Small change.", "Keep the change, {name}.", "Is that all? Cheap.", "Hardly worth the walk.", "Don't spend it all at once, {name}."],
+    hoarder: ["Every penny hurts, {name}.", "I'll be wanting a receipt."],
   },
   payRent: {
-    any: ["Ouch.", "That's daylight robbery, {name}.", "Put it on my tab?"],
-    hoarder: ["My beautiful money…", "Do you take IOUs, {name}?"],
+    any: ["Ouch.", "That's daylight robbery, {name}.", "Put it on my tab?", "Nice place, terrible prices.", "Who sets these rents?", "I should've rolled a 3."],
+    hoarder: ["My beautiful money…", "Do you take IOUs, {name}?", "This is why I don't go out."],
     gambler: ["Easy come, easy go!", "Worth it for the view."],
     dealmaker: ["Let's talk about this, {name}…", "I'll remember this at the negotiating table."],
+    developer: ["Nice build. I'll do better.", "Taking notes on your hotel, {name}."],
+  },
+  payRentHuge: {
+    any: ["WHAT?!", "That's… that's most of my money.", "I'm going to need a minute.", "I think I need to sit down.", "You're a monster, {name}.", "Somebody call my accountant."],
+    gambler: ["Well, that was a bad bet.", "Double or nothing on the next lap?"],
+    hoarder: ["Not the savings! Anything but the savings!"],
+  },
+  landMortgaged: {
+    any: ["Phew, it's mortgaged.", "Free stay, thanks {name}!", "No rent? I'll take it.", "Lucky me — mortgaged!"],
+    dealmaker: ["Short of cash, {name}? I could help with that…"],
+  },
+  landOwn: {
+    any: ["Home sweet home.", "Ah, my own place.", "Nice to visit my own property.", "Checking on the investment."],
+    developer: ["This one needs another house.", "Just inspecting the building work."],
   },
   getRent: {
-    any: ["Thank you kindly, {name}.", "Pleasure doing business.", "Come again soon!"],
-    hoarder: ["Into the vault it goes.", "Every penny counts."],
+    any: ["Thank you kindly, {name}.", "Pleasure doing business.", "Come again soon!", "Ka-ching!", "Enjoy your stay, {name}.", "That's what I like to see."],
+    hoarder: ["Into the vault it goes.", "Every penny counts.", "Lovely. Counting it twice."],
     developer: ["That pays for another house.", "Location, location, location."],
-    collector: ["All aboard the gravy train!"],
+    collector: ["All aboard the gravy train!", "Tickets, please!"],
+    gambler: ["Told you it'd pay off!"],
+  },
+  wince: {
+    any: ["Ooh, that's got to hurt, {name}.", "Glad that wasn't me.", "Brutal.", "I felt that from here."],
   },
   set: {
-    any: ["The full set! Now we're talking.", "Look at that — a complete set."],
+    any: ["The full set! Now we're talking.", "Look at that — a complete set.", "That's a monopoly, folks.", "All mine. Every one of them."],
     developer: ["Time to break ground.", "Bring on the bulldozers!"],
-    collector: ["The collection grows!"],
+    collector: ["The collection grows!", "Complete! Just how I like it."],
     dealmaker: ["See? Trading pays."],
   },
+  rivalSet: {
+    any: ["Uh oh. {name} has a full set.", "Keep an eye on {name}.", "Well, that's worrying.", "I don't like the look of that, {name}.", "Steer clear of {name}'s side of the board."],
+    dealmaker: ["{name}, fancy selling one of those?", "I could've helped you with that, {name}."],
+    hoarder: ["I'm keeping my distance from that lot."],
+  },
   hotel: {
-    any: ["Hotel's open for business!", "Please enjoy your stay."],
+    any: ["Hotel's open for business!", "Please enjoy your stay.", "Check-in is at three. Rent is due now."],
     developer: ["Another masterpiece.", "Five stars, if I say so myself."],
   },
+  doubles: {
+    any: ["Doubles! Again!", "Ooh, another go.", "The dice love me.", "Don't mind if I roll again."],
+    gambler: ["Hot hands!", "Let it ride!"],
+  },
+  go: {
+    any: ["Payday!", "Two hundred, please.", "Round and round we go.", "The bank's been generous."],
+    hoarder: ["Straight into savings."],
+  },
+  tax: {
+    any: ["Taxes. Wonderful.", "The taxman cometh.", "I'd like to speak to my accountant.", "Death and taxes…"],
+    hoarder: ["This is an outrage.", "I demand a refund."],
+  },
+  card: {
+    bad: ["Typical {deck}.", "Who writes these {deck} cards?", "{deck} hates me.", "I'm never drawing {deck} again.", "That card is rigged.", "Of course it's that one.", "Shuffle that deck properly next time!"],
+    good: ["Finally, {deck} comes through!", "I love {deck}!", "Now that's a card.", "{deck}, you beauty.", "About time {deck} was nice to me."],
+    jail: ["Jail? From a {deck} card? Rigged!", "{deck} has it in for me."],
+    repairs: ["Repairs? Who's been jumping on my roofs?", "Street repairs? I don't even own a street sweeper!", "That's a lot of houses to fix."],
+  },
+  jackpot: {
+    any: ["JACKPOT!", "Free Parking pays out!", "Best parking spot in town.", "I'll take that pot, thank you!"],
+  },
+  raised: {
+    any: ["Mortgage time again…", "Just a temporary cash flow problem.", "The bank and I are close friends now.", "Nobody saw that, right?"],
+    hoarder: ["This never happens to me!"],
+    gambler: ["All part of the plan. Probably."],
+  },
   jail: {
-    any: ["This is a misunderstanding!", "I'll be out in no time."],
+    any: ["This is a misunderstanding!", "I'll be out in no time.", "I want my lawyer.", "I was framed!"],
     gambler: ["Worth it.", "I regret nothing!"],
     hoarder: ["At least it's free in here."],
   },
+  freed: {
+    any: ["Free at last!", "Did you miss me?", "Back in business.", "Fresh air!"],
+  },
   declined: {
-    any: ["Your loss, {name}.", "Suit yourself.", "The offer won't last forever."],
+    any: ["Your loss, {name}.", "Suit yourself.", "The offer won't last forever.", "You'll regret that, {name}."],
     dealmaker: ["Everyone has a price, {name}. I'll find yours.", "Let's call that an opening bid."],
   },
+  dealDone: {
+    any: ["Pleasure doing business, {name}.", "A fine deal.", "Signed, sealed, delivered.", "Shake on it, {name}."],
+    dealmaker: ["Another deal done. I love this game.", "Win-win! Well, mostly win for me."],
+  },
   bankrupt: {
-    any: ["I'll be back.", "Good game, everyone.", "Well, that escalated quickly."],
+    any: ["I'll be back.", "Good game, everyone.", "Well, that escalated quickly.", "Tell my properties I loved them."],
     gambler: ["Double or nothing next time?"],
     hoarder: ["But I was saving that!"],
   },
+  rivalBankrupt: {
+    any: ["Farewell, {name}.", "And then there were fewer.", "Rest in peace, {name}'s bank account.", "One down."],
+  },
+  win: {
+    any: ["Thank you, thank you. I'll be here all week.", "Victory! Drinks are on me. Small ones.", "Was there ever any doubt?"],
+  },
+  congrats: {
+    any: ["Well played, {name}.", "Congratulations, {name}. Rematch?", "You got lucky, {name}. Next time!"],
+  },
 };
 
-function chat(p, kind, chance = 0.5, other) {
-  if (!S.options.chatter || !p.cpu || S.over) return;
-  // At most one line per CPU per round, except for the big moments.
-  const big = kind === "bankrupt" || kind === "declined";
-  if (!big && (p.chatRound === S.round || Math.random() > chance)) return;
+// Event-by-event reactions, said by a random CPU when a round event is drawn.
+const EVENT_CHATTER = {
+  boom: ["Cheap houses? Hold my hard hat!", "Time to build, build, build!"],
+  sale: ["A sale! Get your wallets out.", "Bargain hunting time."],
+  hot: ["Stay off {group}, everyone!", "Ooh, {group} are on fire."],
+  strike: ["No rent on {group}? Let's go visit!", "A strike! Free parking on {group}."],
+  rail: ["Rail strike? Typical.", "Stations closed. Mind the gap."],
+  tourists: ["Tourists! Stations will be packed.", "Hope everyone brought their tickets."],
+  heatwave: ["Turn on the fans, the bills are doubling.", "Hot weather, hotter utility bills."],
+  taxfree: ["No taxes? Best round ever.", "The taxman's on holiday!"],
+  payday: ["Bonus season! Lap the board, quick!", "£300 for passing GO? Yes please."],
+  dividend: ["Free money! I love the bank.", "Fifty quid, lovely."],
+  rates: ["Council rates? Again?", "Who's paying for all these potholes, anyway?"],
+  amnesty: ["Jail amnesty! Everyone out!", "Freedom for all!"],
+};
+
+const BIG_MOMENTS = ["start", "bankrupt", "declined", "jackpot", "payRentHuge", "win", "congrats"];
+const DECK_NAMES = { chance: "Chance", chest: "Community Chest" };
+
+// Say a line for `kind`, at most once per CPU per round (big moments excepted),
+// never the same line twice in a row.
+function chat(p, kind, chance = 0.5, vars = {}, lines = null) {
+  if (!S.options.chatter || !p || !p.cpu || p.bankrupt && kind !== "bankrupt") return;
+  const big = BIG_MOMENTS.includes(kind);
+  if ((S.over && kind !== "win" && kind !== "congrats") || (!big && (p.chatRound === S.round || Math.random() > chance))) return;
+  const set = CHATTER[kind] || {};
+  let pool = lines || (set[p.persona] && Math.random() < 0.6 ? set[p.persona] : set.any);
+  if (!pool?.length) return;
+  if (pool.length > 1) pool = pool.filter((l) => l !== p.lastLine);
+  const raw = pool[Math.floor(Math.random() * pool.length)];
+  p.lastLine = raw;
   p.chatRound = S.round;
-  const lines = CHATTER[kind][p.persona] && Math.random() < 0.7 ? CHATTER[kind][p.persona] : CHATTER[kind].any;
-  const text = lines[Math.floor(Math.random() * lines.length)].replace("{name}", other ? other.name : "friend");
+  const text = raw.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? "friend");
   p.bubble = { text, until: Date.now() + 4500 };
   log(`💬 ${p.name}: “${text}”`, p);
   renderPlayers();
   setTimeout(renderPlayers, 4600);
 }
 
+// A CPU other than those in `skip` reacts to something.
+function react(kind, skip, chance, vars) {
+  const pool = alive().filter((q) => q.cpu && !skip.includes(q));
+  if (pool.length) chat(pool[Math.floor(Math.random() * pool.length)], kind, chance, vars);
+}
+
 // ---------------------------------------------------------------- engine events
 
 function onGameEvent(kind, d) {
   const me = soloHuman();
+  const name = (p) => p?.name;
   switch (kind) {
     case "render": return watchBoard();
-    case "buy": return chat(d.p, "buy", 0.35);
-    case "rent":
+    case "start": {
+      const cpus = S.players.filter((p) => p.cpu);
+      if (cpus.length) chat(cpus[Math.floor(Math.random() * cpus.length)], "start", 1, { name: name(S.players.find((p) => !p.cpu) || cpus[0]) });
+      return;
+    }
+    case "buy": return chat(d.p, "buy", 0.4, { tile: BOARD[d.i].name });
+    case "auction": return chat(d.p, "auction", 0.7);
+    case "rent": {
       if (me && d.owner === me && d.rent >= 1000) unlock("jackpot");
-      if (d.rent < 100) return;
-      if (d.p.cpu) return chat(d.p, "payRent", 0.6, d.owner);
-      return chat(d.owner, "getRent", 0.6, d.p);
+      const vars = { name: d.owner.name, tile: BOARD[d.i].name };
+      const huge = d.rent >= 400 || (d.rent >= 150 && d.p.cash < 100);
+      if (d.p.cpu) chat(d.p, huge ? "payRentHuge" : d.rent >= 50 ? "payRent" : "payRentSmall", d.rent >= 50 ? 0.7 : 0.35, vars);
+      if (d.owner.cpu && d.rent >= 50) chat(d.owner, "getRent", 0.6, { name: d.p.name });
+      if (huge) react("wince", [d.p, d.owner], 0.6, { name: d.p.name });
+      return;
+    }
+    case "landMortgaged": return chat(d.p, "landMortgaged", 0.6, { name: d.owner.name });
+    case "landOwn": return chat(d.p, "landOwn", 0.3);
     case "paid":
       if (me && d.p === me && d.amount >= 50 && me.cash < 20 && !S.over) unlock("survivor");
       return;
+    case "raised": return chat(d.p, "raised", 0.7);
+    case "doubles": return chat(d.p, "doubles", 0.3);
+    case "go": return chat(d.p, "go", 0.12);
+    case "tax": return chat(d.p, "tax", 0.5);
+    case "card": {
+      const c = CHATTER.card, deck = DECK_NAMES[d.deck];
+      const lines = d.good ? c.good : d.action === "jail" ? c.jail : d.action === "repairs" ? c.repairs : c.bad;
+      return chat(d.p, "card", d.good ? 0.5 : 0.8, { deck }, Math.random() < 0.6 ? lines : d.good ? c.good : c.bad);
+    }
+    case "jackpot": return chat(d.p, "jackpot", 1);
     case "jail": return chat(d.p, "jail", 0.6);
+    case "freed": return chat(d.p, "freed", 0.4);
     case "hotel": return chat(d.p, "hotel", 0.7);
-    case "declined": return chat(d.p, "declined", 1, d.other);
-    case "bankrupt": return chat(d.p, "bankrupt", 1);
-    case "egg": return unlock("secret");
-    case "gameover": return recordCareer(d.winner);
+    case "declined": return chat(d.p, "declined", 1, { name: d.other.name });
+    case "trade":
+      if (d.p.cpu) chat(d.p, "dealDone", 0.8, { name: d.other.name });
+      else chat(d.other, "dealDone", 0.8, { name: d.p.name });
+      return;
+    case "bankrupt":
+      chat(d.p, "bankrupt", 1);
+      return react("rivalBankrupt", [d.p], 0.8, { name: d.p.name });
+    case "event": {
+      const lines = EVENT_CHATTER[d.id];
+      const cpus = alive().filter((p) => p.cpu);
+      if (lines && cpus.length) chat(cpus[Math.floor(Math.random() * cpus.length)], "event", 0.6, { group: GROUP_NAMES[S.event?.group] || "" }, lines);
+      return;
+    }
+    case "set": {
+      if (d.p.cpu) chat(d.p, "set", 1);
+      return react("rivalSet", [d.p], 0.7, { name: d.p.name });
+    }
+    case "gameover":
+      recordCareer(d.winner);
+      if (d.winner.cpu) chat(d.winner, "win", 1);
+      else react("congrats", [], 1, { name: d.winner.name });
+      return;
   }
 }
 

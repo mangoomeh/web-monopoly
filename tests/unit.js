@@ -1,0 +1,120 @@
+// Focused checks of rules and CPU decisions. Run with: node tests/unit.js
+"use strict";
+const { loadGame, runner, assert } = require("./harness");
+
+const { check, done } = runner("unit");
+const g = loadGame();
+const run = g.run;
+// Runs a check's code in its own scope inside the game; the code returns the verdict.
+const ok = (code) => run(`(() => {${code}})()`);
+
+// A fresh game with `n` CPUs (or humans where `cpus[k]` is false) and given owners.
+run(`
+  function setup(n, { cash, own = {}, cpus, options = {} } = {}) {
+    S = newState({
+      players: Array.from({ length: n }, (_, k) => ({ name: "P" + k, cpu: cpus ? cpus[k] : true, level: "normal", token: TOKENS[k] })),
+      options: { startCash: 1500, speed: "instant", ...options },
+    });
+    if (cash) S.players.forEach((p, k) => (p.cash = cash[k]));
+    for (const [pid, names] of Object.entries(own)) for (const nm of names) S.tiles[tile(nm)].owner = +pid;
+    return S;
+  }
+  function tile(name) { const i = BOARD.findIndex((b) => b.name.startsWith(name)); if (i < 0) throw new Error("no tile " + name); return i; }
+`);
+
+(async () => {
+  console.log("CPU trading");
+  await check("won't hand a rival a colour set for a cheap piece of its own", () => ok(`
+    setup(3, { cash: [800, 800, 800], own: { 0: ["Whitechapel", "Mayfair"], 1: ["Old Kent", "Park Lane"] } });
+    return !cpuAccepts(P(0), P(1), [tile("Mayfair")], [tile("Old Kent")], 0);`));
+  await check("in a duel, won't sell the last orange for £250 (wants £500+)", () => ok(`
+    setup(2, { cash: [1000, 1000], own: { 0: ["Bow", "Marlborough"], 1: ["Vine"] }, cpus: [false, true] });
+    return !cpuAccepts(P(1), P(0), [tile("Vine")], [], 250) && !cpuAccepts(P(1), P(0), [tile("Vine")], [], 500);`));
+  await check("won't spend its last £190 on a property", () => ok(`
+    setup(2, { cash: [1000, 200], own: { 0: ["Strand"] }, cpus: [false, true] });
+    return !cpuAccepts(P(1), P(0), [], [tile("Strand")], -190);`));
+  await check("a counter-offer is a deal the CPU then accepts", () => ok(`
+    setup(2, { cash: [1500, 1500], own: { 0: ["Bow", "Marlborough", "Strand"], 1: ["Vine"] }, cpus: [false, true] });
+    const c = cpuCounterOffer(P(1), P(0), [], [tile("Vine")], 100);
+    return c && cpuAccepts(P(1), P(0), c.get, c.give, c.cash);`));
+  await check("Get Out of Jail Free cards trade and move between players", () => ok(`
+    setup(2, { cpus: [false, true] });
+    P(0).jailCards = ["chance"]; P(1).jailCards = ["chest"];
+    const sells = cpuAccepts(P(1), P(0), ["jail:chest"], [], 200), free = cpuAccepts(P(1), P(0), ["jail:chest"], [], 0);
+    transferItems(["jail:chance"], P(0), P(1));
+    return sells && !free && P(0).jailCards.length === 0 && P(1).jailCards.join() === "chest,chance";`));
+
+  console.log("Building");
+  await check("explains why you can't build", () => ok(`
+    setup(2, { cpus: [false, true], own: { 0: ["Old Kent"] } });
+    const a = buildBlocker(P(0), tile("Old Kent"));
+    S.tiles[tile("Whitechapel")].owner = 0;
+    const ok = buildBlocker(P(0), tile("Old Kent"));
+    build(P(0), tile("Old Kent"));
+    const uneven = buildBlocker(P(0), tile("Old Kent"));
+    return a.startsWith("Need the full colour set") && ok === "" && uneven.startsWith("Build evenly");`));
+
+  await check("selling a hotel when the bank is out of houses brings the whole set down evenly", () => ok(`
+    setup(2, { cpus: [false, true], own: { 0: ["Park Lane", "Mayfair"] } });
+    [37, 39].forEach((i) => (S.tiles[i].houses = 5)); S.hotelsLeft = 10; S.housesLeft = 0; P(0).cash = 0;
+    sell(P(0), 39);
+    return S.tiles[37].houses === 0 && S.tiles[39].houses === 0 && S.hotelsLeft === 12 && S.housesLeft === 0 && P(0).cash === 1000;`));
+  await check("…or to as many houses each as the bank can supply", () => ok(`
+    setup(2, { cpus: [false, true], own: { 0: ["Park Lane", "Mayfair"] } });
+    [37, 39].forEach((i) => (S.tiles[i].houses = 5)); S.hotelsLeft = 10; S.housesLeft = 3; P(0).cash = 0;
+    sell(P(0), 37);
+    return S.tiles[37].houses === 1 && S.tiles[39].houses === 1 && S.housesLeft === 1 && S.hotelsLeft === 12 && P(0).cash === 800;`));
+
+  console.log("Round events");
+  const rent = (id, group, i, roll = 0) => run(`S.event = { id: "${id}", group: ${group ? `"${group}"` : "null"} }; rentFor(${i}, ${roll})`);
+  run(`setup(2, { options: { events: true }, own: { 1: ["Park Lane", "Mayfair", "King's Cross", "Marylebone", "Electric"] } })`);
+  await check("hot street doubles and rent strike cancels a set's rent", () => rent("quiet", null, 39) === 100 && rent("hot", "darkblue", 39) === 200 && rent("strike", "darkblue", 39) === 0);
+  await check("rail strike / tourist season / heatwave", () => rent("rail", null, 5) === 0 && rent("tourists", null, 5) === 100 && rent("heatwave", null, 12, 7) === 56);
+  await check("building boom, property sale and bonus season", () => ok(`
+    S.event = { id: "boom" }; const h = houseCost("darkblue");
+    S.event = { id: "sale" }; const p = buyPrice(tile("Old Kent"));
+    S.event = { id: "payday" }; const go = goSalary();
+    return h === 150 && p === 45 && go === 300;`));
+  await check("nothing changes with events switched off", () => ok(`
+    S.options.events = false; S.event = { id: "hot", group: "darkblue" };
+    const r = rentFor(39, 0);
+    S.options.events = true;
+    return r === 100;`));
+  await check("council rates, dividend and amnesty apply at once", async () => {
+    run(`S.decks.events = [EVENTS.findIndex((e) => e.id === "rates")]; S.eventRound = 0; P(0).cash = 1500; P(1).cash = 1500;`);
+    await run(`startRoundEvent()`);
+    const rates = run(`P(1).cash`);
+    run(`S.decks.events = [EVENTS.findIndex((e) => e.id === "dividend")]`);
+    await run(`startRoundEvent()`);
+    run(`P(0).inJail = true; S.decks.events = [EVENTS.findIndex((e) => e.id === "amnesty")]`);
+    await run(`startRoundEvent()`);
+    assert(rates === 1450, `rates left P1 with ${rates}`);
+    return run(`P(0).cash === 1550 && !P(0).inJail`);
+  });
+
+  console.log("Daily challenge");
+  const deal = (seed) => run(`(() => {
+    const st = newState({ seed: ${seed}, players: [human("Me"), cpuRow(1, "normal"), cpuRow(2, "hard"), cpuRow(3, "normal")], options: { personas: true, startCash: 1500 } });
+    S = st; rng = st.rng;
+    const dice = Array.from({ length: 6 }, () => Math.floor(rand("dice") * 6));
+    return JSON.stringify({ chance: st.decks.chance, chest: st.decks.chest, personas: st.players.map((p) => p.persona), dice });
+  })()`);
+  await check("the same day deals the same game", () => deal(20261028) === deal(20261028));
+  await check("a different day deals a different game", () => deal(20261028) !== deal(20261029));
+
+  console.log("Career & achievements");
+  await check("a game ended early doesn't count", () => ok(`
+    setup(2, { cpus: [false, true] }); S.endedEarly = true; const before = career.games;
+    return recordCareer(P(0)); career.games === before;`));
+  await check("a real win counts, and a tie for last isn't a comeback", () => ok(`
+    setup(2, { cpus: [false, true] }); const before = career.wins;
+    stats().history.push({ round: 6, worth: [1500, 1500] });
+    P(1).bankrupt = true; recordCareer(P(0));
+    return career.wins === before + 1 && !career.achievements.comeback;`));
+  await check("what a scenario hands you at the start doesn't unlock anything", () => ok(`
+    delete career.achievements.all_aboard;
+    setup(2, { cpus: [false, true], own: { 0: ["King's Cross", "Marylebone", "Fenchurch", "Liverpool"] } });
+    return watchBoard(); !career.achievements.all_aboard;`));
+
+  done();
+})();
