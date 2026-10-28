@@ -40,6 +40,24 @@ run(`
   await check("in a 4-player game, won't sell a set's last piece cheaply", () => ok(`
     setup(4, { cash: [1500, 1500, 1500, 1500], own: { 0: ["Bow", "Marlborough"], 1: ["Vine"] } });
     return !cpuAccepts(P(1), P(0), [tile("Vine")], [], 300) && !cpuAccepts(P(1), P(0), [tile("Vine")], [], 450);`));
+  await check("Hard CPUs don't bid each other far over list at auction", async () => {
+    run(`setup(4, { cash: [1500, 1500, 1500, 1500], cpus: [true, true, true, true] }); S.players.forEach((p) => (p.level = "hard"));`);
+    await run(`auction(39, P(0))`);
+    const price = run(`S.players.reduce((t, p) => t + (1500 - p.cash), 0)`);
+    assert(run(`S.tiles[39].owner !== null`), "nobody bought Mayfair");
+    return price <= 500;
+  });
+  await check("...but will go higher to complete or block a set", () => ok(`
+    setup(4, { cpus: [true, true, true, true], own: { 1: ["Park Lane"] } });
+    return auctionCap(P(0), 39) === 800 && auctionCap(P(0), 1) === 75;`));
+  await check("won't overpay for a station you're flipping", () => ok(`
+    setup(4, { cpus: [false, true, true, true], own: { 0: ["King's Cross"], 1: ["Marylebone"] } });
+    P(1).persona = "collector";
+    return cpuAccepts(P(1), P(0), [], [5], -250) && !cpuAccepts(P(1), P(0), [], [5], -300);`));
+  await check("the brown set isn't sold cheaply", () => ok(`
+    setup(4, { cpus: [false, true, true, true], own: { 0: ["Old Kent"], 1: ["Whitechapel"] } });
+    P(1).level = "hard";
+    return !cpuAccepts(P(1), P(0), [tile("Whitechapel")], [], 250);`));
   await check("a counter-offer is a deal the CPU then accepts", () => ok(`
     setup(2, { cash: [1500, 1500], own: { 0: ["Bow", "Marlborough", "Strand"], 1: ["Vine"] }, cpus: [false, true] });
     const c = cpuCounterOffer(P(1), P(0), [], [tile("Vine")], 100);

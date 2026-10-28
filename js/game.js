@@ -726,7 +726,7 @@ async function auction(i, starter) {
     if (q.cpu) {
       setStatus(`🔨 Auction: <b>${esc(b.name)}</b> — high bid ${fmt(high)}${leader ? ` (${esc(leader.name)})` : ""}. ${q.token} ${esc(q.name)} is thinking…`);
       await sleep(450);
-      const max = Math.min((level(q).smart ? smartPrice(q, i) : cpuValue(q, i) * level(q).bid) * persona(q).bid, q.cash - 40);
+      const max = Math.min((level(q).smart ? smartPrice(q, i) : cpuValue(q, i) * level(q).bid) * persona(q).bid, q.cash - 40, auctionCap(q, i));
       if (high + 10 <= max) bid = high + (max - high > 60 && rand() < 0.5 ? 20 : 10);
     } else {
       const steps = [1, 10, 50, 100];
@@ -913,7 +913,7 @@ const level = (p) => CPU_LEVELS[p.level] || CPU_LEVELS.normal;
 // `rivals` how much it minds others gaining, `bid` how high it goes at auction.
 const PERSONAS = {
   steady: { icon: "⚖️", label: "Steady", text: "Plays it by the book." },
-  collector: { icon: "🚂", label: "Collector", text: "Loves stations and utilities.", stations: 2 },
+  collector: { icon: "🚂", label: "Collector", text: "Loves stations and utilities.", stations: 1.4 },
   developer: { icon: "🏗️", label: "Developer", text: "Builds fast, mortgaging whatever it takes.", buildReserve: 0.5, mortgageToBuild: true },
   hoarder: { icon: "💰", label: "Hoarder", text: "Sits on a big pile of cash.", reserve: 1.8, buildReserve: 1.8, idleCash: 0 },
   dealmaker: { icon: "🤝", label: "Dealmaker", text: "Always after a trade, and easier to deal with.", patience: 0.5, accept: -15, rivals: 0.85 },
@@ -971,6 +971,20 @@ function smartPrice(p, i) {
 // Extra cash a Normal CPU keeps back because this round's event makes the
 // squares ahead dearer (Hard CPUs already reckon with the real rents; Easy ones don't).
 const eventCaution = (p) => (p.level === "normal" && activeEvent() ? Math.max(0, dangerReserve(p) - dangerReserve(p, false)) : 0);
+
+// The most a CPU will bid at auction: a little over list price, unless winning
+// completes one of its sets or stops a rival completing theirs. (Without this,
+// Hard CPUs bid each other up to 2-4x list for property that changes nothing.)
+function auctionCap(p, i) {
+  const b = BOARD[i];
+  let decisive = false;
+  if (b.group) {
+    const others = GROUP_TILES[b.group].filter((j) => j !== i);
+    const owners = new Set(others.map((j) => S.tiles[j].owner));
+    decisive = owners.size === 1 && !owners.has(null);
+  } else if (b.type === "station") decisive = countType(p.id, "station") === 3 || alive().some((q) => q !== p && countType(q.id, "station") === 3);
+  return b.price * (decisive ? 2 : 1.25);
+}
 
 function cpuWantsToBuy(p, i) {
   const price = buyPrice(i);
@@ -1058,8 +1072,10 @@ function positionValue(pid, owners, cash, view = PERSONA_DEFAULTS) {
     const mine = tiles.filter((i) => owners[i] === pid);
     if (!mine.length) continue;
     for (const i of mine) v += deed(i);
-    // Rent at three houses, less a share of what those houses cost.
-    const earning = tiles.reduce((s, i) => s + BOARD[i].rents[3], 0) * 0.6 * LANDING[g] - tiles.length * GROUPS[g].houseCost * 0.9;
+    // Rent at three houses, less a share of what those houses cost, plus a flat
+    // amount for owning the set at all (double rent, the right to build) so even
+    // the cheapest set is worth something.
+    const earning = tiles.reduce((s, i) => s + BOARD[i].rents[3], 0) * 0.6 * LANDING[g] - tiles.length * GROUPS[g].houseCost * 0.9 + 150;
     if (mine.length === tiles.length) {
       potential += earning;
       for (const i of tiles) {
@@ -1110,8 +1126,12 @@ function cpuTradeScore(p, other, give, get, cashToP) {
   return { mine, theirs, score: mine - weight * theirs };
 }
 
+// When a CPU simply buys property for cash, it pays no more than it would bid
+// at auction (otherwise players could buy at list and sell straight on at a profit).
+const overpays = (p, give, get, cashToP) =>
+  !give.length && cashToP < 0 && -cashToP > get.reduce((t, i) => t + (isCard(i) ? 50 : auctionCap(p, i)), 0);
 const cpuAccepts = (p, other, give, get, cashToP) =>
-  p.cash + cashToP >= 50 && cpuTradeScore(p, other, give, get, cashToP).score > level(p).accept + persona(p).accept;
+  p.cash + cashToP >= 50 && !overpays(p, give, get, cashToP) && cpuTradeScore(p, other, give, get, cashToP).score > level(p).accept + persona(p).accept;
 
 // The cash (from p to other, in £10 steps, possibly negative) that makes the
 // deal just good enough for `other`, or null if no amount in range will do.
