@@ -52,57 +52,84 @@ function recordCareer(winner) {
   saveCareer();
 
   const myTrades = stats().trades.filter((t) => t.who?.includes(me.id)).length;
-  if (myTrades >= 5) unlock("dealmaker");
+  award("dealmaker", tierFor(myTrades, [5, 7, 10]));
   if (!won) return;
-  unlock("first_win");
-  if (level === "hard") unlock("win_hard");
-  if (career.streak >= 3) unlock("streak3");
-  if (S.players.filter((p) => p.cpu).length >= 5) unlock("full_table");
-  if (alive().length === 1 && S.round <= 30) unlock("blitz");
-  if (!myTrades) unlock("lone_wolf");
-  // Strictly last (among those still in) at some point from round 5 on.
-  if (stats().history.some((pt) => pt.round >= 5 && !pt.final && pt.worth.every((v, k) => k === me.id || v === 0 || pt.worth[me.id] < v))) unlock("comeback");
-  if (S.mode?.kind === "daily") unlock("daily");
-  if (SCENARIOS.every((sc) => career.scenarios[sc.id])) unlock("scenarios");
+  const cpus = S.players.filter((p) => p.cpu), allHard = cpus.every((p) => p.level === "hard");
+  award("first_win", 0);
+  award("win_hard", allHard && cpus.length >= 5 ? 2 : allHard && cpus.length >= 3 ? 1 : cpus.some((p) => p.level === "hard") ? 0 : -1);
+  award("streak3", tierFor(career.streak, [3, 5, 10]));
+  if (cpus.length >= 5) award("full_table", 0);
+  if (alive().length === 1 && S.round <= 30) award("blitz", 0);
+  if (!myTrades) award("lone_wolf", cpus.length >= 3 && allHard ? 2 : cpus.length >= 3 && cpus.every((p) => p.level !== "easy") ? 1 : 0);
+  // Bronze: strictly last at some point from round 5 on. Silver/Gold: trailing
+  // everyone still in by £500 / £1,500 at some point from round 10 on.
+  const h = stats().history.filter((pt) => !pt.final);
+  const trail = Math.max(-1, ...h.filter((pt) => pt.round >= 10).map((pt) => Math.min(...pt.worth.filter((v, k) => k !== me.id && v > 0)) - pt.worth[me.id]));
+  const last = h.some((pt) => pt.round >= 5 && pt.worth.every((v, k) => k === me.id || v === 0 || pt.worth[me.id] < v));
+  award("comeback", trail >= 1500 ? 2 : trail >= 500 ? 1 : last ? 0 : -1);
+  if (S.mode?.kind === "daily") award("daily", 0);
+  if (SCENARIOS.every((sc) => career.scenarios[sc.id])) award("scenarios", 0);
 }
 
 // ---------------------------------------------------------------- achievements
 
+// Tiered achievements list what each tier needs, Bronze first. Badges earned
+// before tiers existed were Bronze-level, so they're kept as Bronze.
 const ACHIEVEMENTS = [
-  { id: "first_win", icon: "🏆", title: "First win", text: "Win a game." },
-  { id: "win_hard", icon: "🔥", title: "Giant slayer", text: "Win against a Hard CPU." },
-  { id: "streak3", icon: "📈", title: "On a roll", text: "Win three games in a row." },
-  { id: "full_table", icon: "👥", title: "Full table", text: "Win against five CPUs." },
-  { id: "blitz", icon: "⚡", title: "Blitz", text: "Bankrupt every opponent within 30 rounds." },
-  { id: "lone_wolf", icon: "🐺", title: "Lone wolf", text: "Win without making a single trade." },
-  { id: "comeback", icon: "🔄", title: "Comeback", text: "Win after being in last place from round 5 on." },
-  { id: "first_set", icon: "🎨", title: "Set collector", text: "Own a full colour set." },
-  { id: "tycoon", icon: "🎩", title: "Tycoon", text: "Own three full colour sets at once." },
-  { id: "all_aboard", icon: "🚂", title: "All aboard", text: "Own all four stations." },
-  { id: "mayfair_hotel", icon: "🏨", title: "Mayfair hotel", text: "Build a hotel on Mayfair." },
-  { id: "jackpot", icon: "💰", title: "Jackpot", text: "Collect £1,000 or more in a single rent." },
-  { id: "dealmaker", icon: "🤝", title: "Art of the deal", text: "Make five trades in one game." },
-  { id: "survivor", icon: "🛟", title: "Close call", text: "Pay a bill and be left with less than £20." },
-  { id: "rich", icon: "💎", title: "Five grand", text: "Reach a net worth of £5,000." },
-  { id: "daily", icon: "📅", title: "Daily driver", text: "Win a daily challenge." },
-  { id: "scenarios", icon: "🎯", title: "Scenario master", text: "Complete every scenario." },
-  { id: "secret", icon: "🤫", title: "Pennybags' secret", text: "Find the easter egg." },
+  { id: "first_win", icon: "🏆", title: "First win", tiers: ["Win a game."] },
+  { id: "win_hard", icon: "🔥", title: "Giant slayer", tiers: ["Win against a Hard CPU.", "Win against three or more CPUs, all of them Hard.", "Win against five Hard CPUs."] },
+  { id: "streak3", icon: "📈", title: "On a roll", tiers: ["Win three games in a row.", "Win five games in a row.", "Win ten games in a row."] },
+  { id: "full_table", icon: "👥", title: "Full table", tiers: ["Win against five CPUs."] },
+  { id: "blitz", icon: "⚡", title: "Blitz", tiers: ["Bankrupt every opponent within 30 rounds."] },
+  { id: "lone_wolf", icon: "🐺", title: "Lone wolf", tiers: ["Win without making a single trade.", "Win against three or more Normal or Hard CPUs without trading.", "Win against three or more Hard CPUs without trading."] },
+  { id: "comeback", icon: "🔄", title: "Comeback", tiers: ["Win after being in last place from round 5 on.", "Win after trailing everyone by £500, from round 10 on.", "Win after trailing everyone by £1,500, from round 10 on."] },
+  { id: "first_set", icon: "🎨", title: "Set collector", tiers: ["Own a full colour set."] },
+  { id: "tycoon", icon: "🎩", title: "Tycoon", tiers: ["Own three full colour sets at once.", "Own five full colour sets at once.", "Own seven full colour sets at once."] },
+  { id: "all_aboard", icon: "🚂", title: "All aboard", tiers: ["Own all four stations.", "Own all four stations and both utilities."] },
+  { id: "mayfair_hotel", icon: "🏨", title: "Mayfair hotel", tiers: ["Build a hotel on Mayfair."] },
+  { id: "jackpot", icon: "💰", title: "Jackpot", tiers: ["Collect £1,000 or more in a single rent.", "Collect £1,500 or more in a single rent.", "Collect £2,000 in a single rent."] },
+  { id: "dealmaker", icon: "🤝", title: "Art of the deal", tiers: ["Make five trades in one game.", "Make seven trades in one game.", "Make ten trades in one game."] },
+  { id: "survivor", icon: "🛟", title: "Close call", tiers: ["Pay a bill and be left with less than £20."] },
+  { id: "rich", icon: "💎", title: "Fat cat", tiers: ["Reach a net worth of £5,000.", "Reach a net worth of £8,000.", "Reach a net worth of £12,000."] },
+  { id: "daily", icon: "📅", title: "Daily driver", tiers: ["Win a daily challenge."] },
+  { id: "scenarios", icon: "🎯", title: "Scenario master", tiers: ["Complete every scenario."] },
+  { id: "secret", icon: "🤫", title: "Pennybags' secret", tiers: ["Find the easter egg."] },
 ];
+const MEDALS = [{ icon: "🥉", name: "Bronze" }, { icon: "🥈", name: "Silver" }, { icon: "🥇", name: "Gold" }];
 
-function unlock(id) {
-  if (career.achievements[id]) return;
-  const a = ACHIEVEMENTS.find((x) => x.id === id);
-  career.achievements[id] = new Date().toISOString().slice(0, 10);
-  saveCareer();
-  if (S && S.players.length) {
-    (S.newFeats = S.newFeats || []).push(id);
-    log(`🏅 Achievement unlocked: ${a.icon} ${a.title} — ${a.text}`, null, true);
-  }
-  setTimeout(() => toast(`🏅 Achievement unlocked: ${a.title}`), 300);
+// The highest tier (0-based) whose threshold `v` reaches, or -1.
+const tierFor = (v, steps) => steps.reduce((t, s, k) => (v >= s ? k : t), -1);
+// The tier earned so far, or -1. Older saves stored just a date: that's Bronze.
+function tierOf(id) {
+  const got = career.achievements[id];
+  return got === undefined ? -1 : typeof got === "string" ? 0 : got.tier;
 }
 
-const featHtml = (a) => `<div class="feat ${career.achievements[a.id] ? "" : "locked"}" title="${esc(a.text)}">
-  <span class="feat-icon">${a.icon}</span><b>${esc(a.title)}</b><small>${esc(a.text)}</small></div>`;
+function award(id, tier) {
+  if (tier < 0 || tier <= tierOf(id)) return;
+  const a = ACHIEVEMENTS.find((x) => x.id === id), upgrade = tierOf(id) >= 0;
+  career.achievements[id] = { tier, date: new Date().toISOString().slice(0, 10) };
+  saveCareer();
+  const name = `${a.title}${a.tiers.length > 1 ? ` (${MEDALS[tier].icon} ${MEDALS[tier].name})` : ""}`;
+  if (S && S.players.length) {
+    S.newFeats = (S.newFeats || []).filter((x) => x !== id).concat(id);
+    log(`🏅 Achievement ${upgrade ? "upgraded" : "unlocked"}: ${a.icon} ${name} — ${a.tiers[tier]}`, null, true);
+  }
+  // Several at once take turns rather than overwriting each other.
+  const at = Math.max(Date.now() + 300, award.next || 0);
+  award.next = at + 2600;
+  setTimeout(() => toast(`🏅 ${upgrade ? "Upgraded" : "Unlocked"}: ${name}`), at - Date.now());
+}
+const unlock = (id) => award(id, 0);
+
+const unlockedCount = () => ACHIEVEMENTS.filter((a) => tierOf(a.id) >= 0).length;
+function featHtml(a) {
+  const tier = tierOf(a.id), tiered = a.tiers.length > 1;
+  const medal = tiered && tier >= 0 ? `<span class="medal" title="${MEDALS[tier].name}">${MEDALS[tier].icon}</span>` : "";
+  const next = tiered && tier >= 0 && tier < a.tiers.length - 1 ? `<small class="next">Next ${MEDALS[tier + 1].icon}: ${esc(a.tiers[tier + 1])}</small>` : "";
+  return `<div class="feat ${tier >= 0 ? "" : "locked"}" title="${esc(a.tiers[Math.max(0, tier)])}">
+    <span class="feat-icon">${a.icon}</span><b>${esc(a.title)} ${medal}</b><small>${esc(a.tiers[Math.max(0, tier)])}</small>${next}</div>`;
+}
 
 // Things that are true of the board at any moment: checked after each redraw.
 function watchBoard() {
@@ -115,16 +142,17 @@ function watchBoard() {
   }
   const me = soloHuman();
   if (!me || S.over || me.bankrupt) return;
-  const checks = {
-    first_set: sets[me.id].length >= 1,
-    tycoon: sets[me.id].length >= 3,
-    all_aboard: countType(me.id, "station") === 4,
-    mayfair_hotel: S.tiles[39].owner === me.id && S.tiles[39].houses === 5,
-    rich: netWorth(me) >= 5000,
+  const stations = countType(me.id, "station") === 4;
+  const tiers = {
+    first_set: tierFor(sets[me.id].length, [1]),
+    tycoon: tierFor(sets[me.id].length, [3, 5, 7]),
+    all_aboard: stations ? (countType(me.id, "utility") === 2 ? 1 : 0) : -1,
+    mayfair_hotel: S.tiles[39].owner === me.id && S.tiles[39].houses === 5 ? 0 : -1,
+    rich: tierFor(netWorth(me), [5000, 8000, 12000]),
   };
   // Anything a scenario hands you at the start doesn't count.
-  if (!S.preSatisfied) S.preSatisfied = Object.keys(checks).filter((id) => checks[id]);
-  for (const id in checks) if (checks[id] && !S.preSatisfied.includes(id)) unlock(id);
+  if (!S.preSatisfied || Array.isArray(S.preSatisfied)) S.preSatisfied = { ...tiers };
+  for (const id in tiers) if (tiers[id] > S.preSatisfied[id]) award(id, tiers[id]);
 }
 
 // ---------------------------------------------------------------- CPU chatter
@@ -324,7 +352,7 @@ function onGameEvent(kind, d) {
     case "buy": return chat(d.p, "buy", 0.4, { tile: BOARD[d.i].name });
     case "auction": return chat(d.p, "auction", 0.7);
     case "rent": {
-      if (me && d.owner === me && d.rent >= 1000) unlock("jackpot");
+      if (me && d.owner === me) award("jackpot", tierFor(d.rent, [1000, 1500, 2000]));
       const vars = { name: d.owner.name, tile: BOARD[d.i].name };
       const huge = d.rent >= 400 || (d.rent >= 150 && d.p.cash < 100);
       if (d.p.cpu) chat(d.p, huge ? "payRentHuge" : d.rent >= 50 ? "payRent" : "payRentSmall", d.rent >= 50 ? 0.7 : 0.35, vars);
@@ -462,7 +490,7 @@ function openCareer() {
       </div>
       ${levels ? `<table class="career-table"><tr><th>Toughest CPU</th><th>Wins</th><th>Rate</th></tr>${levels}</table>` : ""}
       <p class="small">📅 Daily challenges: ${days.filter((d) => d.won).length} won of ${days.length} played · 🎯 Scenarios: ${SCENARIOS.filter((sc) => career.scenarios[sc.id]).length} of ${SCENARIOS.length}</p>
-      <h3 class="stats-head">Achievements · ${Object.keys(career.achievements).length} of ${ACHIEVEMENTS.length}</h3>
+      <h3 class="stats-head">Achievements · ${unlockedCount()} of ${ACHIEVEMENTS.length} <small class="medal-count">${MEDALS.map((m, t) => `${m.icon} ${ACHIEVEMENTS.filter((a) => a.tiers.length > 1 && tierOf(a.id) === t).length}`).join(" · ")}</small></h3>
       <div class="feat-grid">${ACHIEVEMENTS.map(featHtml).join("")}</div>`,
     buttons: [
       { label: "Reset career", value: "reset", danger: true, onClick() {
@@ -489,7 +517,7 @@ function soloModesHtml() {
   return `<div class="modes">
     <button class="mode" data-mode="daily"><b>📅 Daily challenge</b><small>${d ? (d.won ? `Won today with ${fmt(d.worth)}` : "Played today: try again?") : "Same deal for everyone today"}</small></button>
     <button class="mode" data-mode="scenarios"><b>🎯 Scenarios</b><small>${SCENARIOS.filter((sc) => career.scenarios[sc.id]).length} of ${SCENARIOS.length} complete</small></button>
-    <button class="mode" data-mode="career"><b>🏅 Career</b><small>${plural(career.wins, "win")} · ${Object.keys(career.achievements).length}/${ACHIEVEMENTS.length} badges</small></button>
+    <button class="mode" data-mode="career"><b>🏅 Career</b><small>${plural(career.wins, "win")} · ${unlockedCount()}/${ACHIEVEMENTS.length} badges</small></button>
   </div>`;
 }
 

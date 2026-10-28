@@ -162,6 +162,13 @@ run(`
     stats().history.push({ round: 6, worth: [1500, 1500] });
     P(1).bankrupt = true; recordCareer(P(0));
     return career.wins === before + 1 && !career.achievements.comeback;`));
+  await check("badges saved before tiers count as Bronze and can be upgraded", () => ok(`
+    career.achievements.rich = "2026-10-20"; const was = tierOf("rich");
+    award("rich", 0); const same = career.achievements.rich === "2026-10-20";
+    award("rich", 1);
+    return was === 0 && same && tierOf("rich") === 1 && career.achievements.rich.tier === 1;`));
+  await check("tiers follow the thresholds", () => ok(`
+    return tierFor(4, [5, 7, 10]) === -1 && tierFor(5, [5, 7, 10]) === 0 && tierFor(8, [5, 7, 10]) === 1 && tierFor(12, [5, 7, 10]) === 2;`));
   await check("what a scenario hands you at the start doesn't unlock anything", () => ok(`
     delete career.achievements.all_aboard;
     setup(2, { cpus: [false, true], own: { 0: ["King's Cross", "Marylebone", "Fenchurch", "Liverpool"] } });

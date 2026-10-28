@@ -17,7 +17,7 @@ A complete, browser-based take on the classic property-trading board game (Londo
 - Round events (optional): a surprise every round, such as a building boom, rent strike, heatwave, tax holiday, market crash, charity drive or roadworks
 - CPU moves (building, trades, raising cash) are shown on screen long enough to follow, even at Instant speed
 - After the game ends you can close the results to look over the final board and game log
-- Single player: a daily challenge (same deal for everyone each day), six scenarios, a career record with 18 achievements, and CPU chatter
+- Single player: a daily challenge (same deal for everyone each day), six scenarios, a career record with 18 achievements (most with Bronze, Silver and Gold tiers), and CPU chatter
 - Optional Free Parking jackpot house rule, adjustable starting cash and CPU speed
 - Animated tokens and dice, game log, title-deed cards (click any property)
 - Auto-saves to your browser at the end of every turn
