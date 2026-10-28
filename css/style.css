@@ -699,3 +699,48 @@ kbd { background: #eee; border: 1px solid #bbb; border-radius: 4px; padding: 0 4
 .stat-facts { list-style: none; padding: 0; margin: 8px 0 0; font-size: 0.92em; line-height: 1.6; }
 .stat-facts details { display: inline; margin-left: 6px; }
 .stat-facts ul { margin: 4px 0; padding-left: 1.2em; font-size: 0.92em; }
+
+/* Single-player: mode tiles, scenarios, career, achievements, chatter */
+.modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.mode, .scenario { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; padding: 10px 12px; border-radius: 10px; }
+.mode small, .scenario small { font-weight: 400; color: var(--muted); font-size: 0.8em; }
+@media (max-width: 480px) { .modes { grid-template-columns: 1fr; } }
+.scenario-list { display: flex; flex-direction: column; gap: 8px; }
+.scenario { flex-direction: row; align-items: center; gap: 12px; width: 100%; }
+.scenario > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.sc-icon { font-size: 1.8em; }
+.career-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0 12px; }
+.career-tiles div { background: #fff; border: 1px solid var(--panel-line); border-radius: 10px; padding: 8px; text-align: center; display: flex; flex-direction: column; }
+.career-tiles b { font-size: 1.3em; }
+.career-tiles small { color: var(--muted); font-size: 0.75em; }
+@media (max-width: 480px) { .career-tiles { grid-template-columns: repeat(2, 1fr); } }
+.career-table { border-collapse: collapse; width: 100%; font-size: 0.9em; margin-bottom: 6px; }
+.career-table th, .career-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--panel-line); }
+.feat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.feat { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; background: #fff8dd; border: 1px solid #e6c84a; border-radius: 8px; padding: 6px 8px; font-size: 0.85em; }
+.feat small { grid-column: 2; color: var(--muted); font-size: 0.85em; }
+.feat-icon { grid-row: span 2; font-size: 1.5em; }
+.feat.locked { background: #f1efe8; border-color: var(--panel-line); }
+.feat.locked .feat-icon { filter: grayscale(1); opacity: 0.45; }
+.feat.locked b { color: var(--muted); }
+.solo-result { margin-top: 12px; padding: 8px 10px; background: #fff; border: 1px solid var(--panel-line); border-radius: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.copy-result { margin-left: auto; padding: 4px 10px; font-size: 0.85em; }
+.copy-fallback { width: 100%; min-height: 4.5em; font: inherit; font-size: 0.85em; }
+.player { position: relative; }
+.bubble {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% - 10px);
+  max-width: 75%;
+  background: #fff;
+  color: #222;
+  border: 1px solid var(--panel-line);
+  border-radius: 12px 12px 2px 12px;
+  padding: 4px 10px;
+  font-size: 0.8em;
+  font-style: italic;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
+  z-index: 4;
+  animation: bubble-in 0.2s ease-out;
+}
+@keyframes bubble-in { from { opacity: 0; transform: translateY(4px); } }

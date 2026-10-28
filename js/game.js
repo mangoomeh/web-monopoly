@@ -5,9 +5,24 @@ const SAVE_KEY = "web-monopoly-save-v2";
 const $ = (sel) => document.querySelector(sel);
 const fmt = (n) => (n < 0 ? "-£" : "£") + Math.abs(Math.round(n)).toLocaleString("en-GB");
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Seeded games (the daily challenge) draw their randomness from here so everyone
+// gets the same deal. Dice have their own stream, so choices that use up other
+// random numbers (auctions, events) don't change the dice.
+let rng = null;
+function rand(stream = "misc") {
+  if (!rng) return Math.random();
+  let t = (rng[stream] = (rng[stream] + 0x6d2b79f5) | 0);
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const pick = (arr, stream) => arr[Math.floor(rand(stream) * arr.length)];
+// Single-player extras (js/solo.js) listen in here; it's optional.
+const hook = (kind, data) => typeof onGameEvent === "function" && onGameEvent(kind, data);
+
 const shuffle = (arr) => {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
@@ -33,10 +48,13 @@ let S = null; // whole game state (serialisable)
 let pending = null; // current question waiting for a human click
 
 function newState(setup) {
+  rng = setup.seed != null ? { misc: setup.seed, dice: setup.seed ^ 0x5bd1e995 } : null;
   return {
+    rng,
+    mode: setup.mode || null,
     players: setup.players.map((p, id) => ({
       id, name: p.name, cpu: p.cpu, level: p.level || "normal", token: p.token, color: PLAYER_COLORS[id],
-      persona: p.cpu && setup.options.personas ? Object.keys(PERSONAS)[Math.floor(Math.random() * Object.keys(PERSONAS).length)] : null,
+      persona: p.cpu ? p.persona || (setup.options.personas ? pick(Object.keys(PERSONAS)) : null) : null,
       cash: setup.options.startCash, pos: 0, inJail: false, jailTurns: 0, jailCards: [], bankrupt: false,
     })),
     tiles: BOARD.map(() => ({ owner: null, houses: 0, mortgaged: false })),
@@ -172,6 +190,7 @@ function build(p, i) {
   if (t.houses === 4) { S.hotelsLeft--; S.housesLeft += 4; } else S.housesLeft--;
   t.houses++;
   log(`${p.name} built a ${t.houses === 5 ? "hotel" : "house"} on ${BOARD[i].name} for ${fmt(cost)}.`, p);
+  if (t.houses === 5) hook("hotel", { p, i });
 }
 
 function canSell(p, i) {
@@ -237,6 +256,7 @@ async function pay(p, amount, creditor, toPot = false) {
     }
   }
   p.cash -= amount;
+  hook("paid", { p, amount });
   if (creditor) creditor.cash += amount;
   else if (toPot && S.options.freeParking) S.pot += amount;
   render();
@@ -267,6 +287,7 @@ async function humanRaiseFunds(p, amount, creditor) {
 }
 
 async function goBankrupt(p, creditor) {
+  hook("bankrupt", { p, creditor });
   for (const i of ownedBy(p)) {
     const t = S.tiles[i];
     if (t.houses) {
@@ -326,6 +347,7 @@ function sendToJail(p) {
   p.inJail = true;
   p.jailTurns = 0;
   log(`🚔 ${p.name} was sent to Jail.`, p);
+  hook("jail", { p });
   render();
 }
 
@@ -338,7 +360,7 @@ async function rollDice() {
     await sleep(70);
   }
   el.classList.remove("rolling");
-  S.dice = [1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)];
+  S.dice = [1 + Math.floor(rand("dice") * 6), 1 + Math.floor(rand("dice") * 6)];
   renderDice();
   return S.dice;
 }
@@ -348,6 +370,10 @@ async function rollDice() {
 async function gameLoop() {
   while (!S.over) {
     if (alive().length <= 1) return showWinner();
+    if (S.options.roundLimit && S.round > S.options.roundLimit) {
+      log(`⏱️ ${S.options.roundLimit} rounds are up — highest net worth wins.`, null, true);
+      return showWinner();
+    }
     if (stats().history.at(-1)?.round !== S.round) recordWorth();
     if (S.round === 5 && !S.hinted) {
       S.hinted = true;
@@ -429,7 +455,7 @@ async function startRoundEvent() {
     // Prefer a set somebody owns part of, so the event matters.
     const groups = Object.keys(GROUP_TILES), owned = groups.filter((g) => GROUP_TILES[g].some((i) => S.tiles[i].owner !== null));
     const pool = owned.length ? owned : groups;
-    S.event.group = pool[Math.floor(Math.random() * pool.length)];
+    S.event.group = pick(pool);
   }
   log(`${e.icon} Round ${S.round} event — ${e.title}: ${eventText()}`, null, true);
   const html = eventHtml();
@@ -517,6 +543,7 @@ async function landOn(p, diceTotal, cardMode) {
       const st = stats();
       st.rentGot[owner.id] += rent;
       if (!st.biggestRent || rent > st.biggestRent.amount) st.biggestRent = { amount: rent, payer: p.id, owner: owner.id, tile: i, round: S.round };
+      hook("rent", { p, owner, rent, i });
     }
     return;
   }
@@ -626,6 +653,7 @@ async function offerToBuy(p, i) {
     S.tiles[i].owner = p.id;
     log(`🏠 ${p.name} bought ${b.name} for ${fmt(price)}.`, p);
     toast(`${p.name} bought ${b.name}`);
+    hook("buy", { p, i });
     render();
   } else {
     log(`${p.name} didn't buy ${b.name}.`, p);
@@ -650,7 +678,7 @@ async function auction(i, starter) {
       setStatus(`🔨 Auction: <b>${esc(b.name)}</b> — high bid ${fmt(high)}${leader ? ` (${esc(leader.name)})` : ""}. ${q.token} ${esc(q.name)} is thinking…`);
       await sleep(450);
       const max = Math.min((level(q).smart ? smartPrice(q, i) : cpuValue(q, i) * level(q).bid) * persona(q).bid, q.cash - 40);
-      if (high + 10 <= max) bid = high + (max - high > 60 && Math.random() < 0.5 ? 20 : 10);
+      if (high + 10 <= max) bid = high + (max - high > 60 && rand() < 0.5 ? 20 : 10);
     } else {
       const steps = [1, 10, 50, 100];
       const res = await ask(
@@ -694,9 +722,10 @@ async function showWinner() {
   setStatus(`🏆 <b>${esc(w.name)}</b> wins!`);
   S.over = true;
   recordWorth(true);
+  hook("gameover", { winner: w });
   render();
   const results = `<ol class="standings">${ranked.map((p) => `<li><span class="tok" style="--c:${p.color}">${p.token}</span> ${esc(p.name)} <span>${p.bankrupt ? "bankrupt" : fmt(netWorth(p))}</span></li>`).join("")}</ol>
-    ${statsHtml()}`;
+    ${statsHtml()}${typeof soloResultsHtml === "function" ? soloResultsHtml(w) : ""}`;
   // Players can close the results to look over the final board and the game log.
   let again = await modal({
     title: `🏆 ${esc(w.name)} wins!`,
@@ -1108,6 +1137,7 @@ async function cpuTryTrade(p) {
     });
     if (!accepted) {
       log(`${other.name} turned down ${p.name}'s offer for ${side(get, 0)}.`, p);
+      hook("declined", { p, other });
       return;
     }
   }
@@ -1119,7 +1149,8 @@ async function cpuTryTrade(p) {
   p.cash -= cash;
   other.cash += cash;
   log(`🤝 ${p.name} traded with ${other.name}: gave ${side(give, cash)}, got ${side(get, -cash)}.`, p, true);
-  stats().trades.push({ round: S.round, text: `${p.name} gave ${other.name} ${side(give, cash)} for ${side(get, -cash)}` });
+  stats().trades.push({ round: S.round, who: [p.id, other.id], text: `${p.name} gave ${other.name} ${side(give, cash)} for ${side(get, -cash)}` });
+  hook("trade", { p, other });
   toast(`${p.name} traded for ${get.map((j) => BOARD[j].name).join(", ")}`);
   if (other.cpu) await announce(`🤝 ${esc(other.name)} accepted. ${esc(p.name)} now owns ${esc(get.map((j) => BOARD[j].name).join(", "))}.`, 1800);
   render();
@@ -1187,6 +1218,7 @@ const PENNYBAGS = [
   "Made with ❤️ since GA SEI-33.",
 ];
 function moneyRain() {
+  hook("egg", {});
   toast(PENNYBAGS[Math.floor(Math.random() * PENNYBAGS.length)]);
   if (matchMedia("(prefers-reduced-motion: reduce)").matches || document.querySelector(".money-rain")) return;
   const rain = document.createElement("div");
@@ -1468,7 +1500,8 @@ function openTrade(p) {
         const gave = [names(give), cashGive ? fmt(cashGive) : ""].filter(Boolean).join(" + ") || "nothing";
         const got = [names(get), cashGet ? fmt(cashGet) : ""].filter(Boolean).join(" + ") || "nothing";
         log(`🤝 ${p.name} traded with ${other.name}: gave ${gave}, got ${got}.`, p);
-        stats().trades.push({ round: S.round, text: `${p.name} gave ${other.name} ${gave} for ${got}` });
+        stats().trades.push({ round: S.round, who: [p.id, other.id], text: `${p.name} gave ${other.name} ${gave} for ${got}` });
+        hook("trade", { p, other });
         toast("Trade completed!");
         close(true);
         render();
@@ -1521,6 +1554,7 @@ function render() {
   renderPrompt();
   renderDice();
   renderLog();
+  if (S.players.length) hook("render", {});
 }
 
 // The human about to roll, if any: their reachable squares get highlighted.
@@ -1590,6 +1624,7 @@ function renderPlayers() {
       <div class="phead"><span class="tok" style="--c:${p.color}">${p.token}</span>
         <span class="pname">${esc(p.name)}${p.cpu ? ` <small>CPU${p.level && p.level !== "normal" ? ` · ${level(p).label}` : ""}</small>` : ""}${p.persona ? ` <small class="persona" title="${esc(PERSONAS[p.persona].text)}">${PERSONAS[p.persona].icon}<span> ${PERSONAS[p.persona].label}</span></small>` : ""}</span>
         <span class="pcash">${p.bankrupt ? "Bankrupt" : fmt(p.cash)}</span></div>
+      ${p.bubble && p.bubble.until > Date.now() ? `<div class="bubble">${esc(p.bubble.text)}</div>` : ""}
       <div class="pmeta">${p.inJail ? "🚔 In Jail · " : ""}${p.jailCards.length ? `🎫×${p.jailCards.length} · ` : ""}Net worth ${fmt(netWorth(p))}</div>
       <div class="pprops">${props.map((i) => `<span class="chip ${S.tiles[i].mortgaged ? "mort" : ""}" data-i="${i}" title="${esc(BOARD[i].name)}" style="background:${BOARD[i].group ? GROUPS[BOARD[i].group].color : "#ccc"}">${BOARD[i].icon || (S.tiles[i].houses === 5 ? "H" : S.tiles[i].houses || "")}</span>`).join("")}</div>
     </div>`;
@@ -1614,7 +1649,7 @@ function renderPrompt() {
   $("#tools").hidden = !human;
   if (human) $("#tools-who").innerHTML = `<span class="tok" style="--c:${p.color}">${p.token}</span>`;
   $("#pot").textContent = S.options.freeParking ? `Free Parking jackpot: ${fmt(S.pot)}` : "";
-  $("#round").textContent = `Round ${S.round}`;
+  $("#round").textContent = `${S.mode?.label ? `${S.mode.label} · ` : ""}Round ${S.round}${S.options.roundLimit ? ` of ${S.options.roundLimit}` : ""}`;
   const e = activeEvent();
   $("#event").innerHTML = e && e.id !== "quiet" ? `${e.icon} <b>${esc(e.title)}</b>${S.event.group ? `: ${GROUP_NAMES[S.event.group]}` : ""}` : "";
   $("#event").title = e ? eventText() : "";
@@ -1638,7 +1673,7 @@ function renderLog() {
 
 function openSetup() {
   const rows = DEFAULT_NAMES.slice(0, 4).map((name, k) => ({ name, cpu: k > 0, level: "normal", token: TOKENS[k] }));
-  const opts = { startCash: 1500, auction: true, freeParking: false, events: false, personas: true, speed: "normal" };
+  const opts = { startCash: 1500, auction: true, freeParking: false, events: false, personas: true, chatter: true, speed: "normal" };
   const rowsHtml = () => rows.map((r, k) => `<div class="setup-row" style="--c:${PLAYER_COLORS[k]}">
       <button class="tok tok-pick" data-k="${k}" title="Change token" style="--c:${PLAYER_COLORS[k]}">${r.token}</button>
       <input class="sname" data-k="${k}" value="${esc(r.name)}" maxlength="14" aria-label="Player ${k + 1} name">
@@ -1648,7 +1683,8 @@ function openSetup() {
   modal({
     title: '<span class="logo-mini">WEB MONOPOLY</span>',
     wide: true,
-    html: `<p class="small">Pass-and-play with friends, or take on CPU opponents. 2–6 players.</p>
+    html: `${typeof soloModesHtml === "function" ? soloModesHtml() : ""}
+      <p class="small">Or set up your own game: pass-and-play with friends, or take on CPU opponents. 2–6 players.</p>
       <div id="setup-rows"></div>
       <button id="add-player" class="ghost">+ Add player</button>
       <div class="setup-opts">
@@ -1658,9 +1694,10 @@ function openSetup() {
         <label><input type="checkbox" id="o-fp"> Free Parking jackpot (taxes &amp; fines)</label>
         <label><input type="checkbox" id="o-events"> Round events (a surprise every round)</label>
         <label><input type="checkbox" id="o-personas" checked> CPU personalities</label>
+        <label><input type="checkbox" id="o-chatter" checked> CPU chatter</label>
       </div>`,
     buttons: [{ label: "Start game", value: true, primary: true }],
-    onMount(box) {
+    onMount(box, close) {
       const list = box.querySelector("#setup-rows");
       const draw = () => {
         list.innerHTML = rowsHtml();
@@ -1699,20 +1736,25 @@ function openSetup() {
       box.querySelector("#o-fp").addEventListener("change", (e) => (opts.freeParking = e.target.checked));
       box.querySelector("#o-events").addEventListener("change", (e) => (opts.events = e.target.checked));
       box.querySelector("#o-personas").addEventListener("change", (e) => (opts.personas = e.target.checked));
+      box.querySelector("#o-chatter").addEventListener("change", (e) => (opts.chatter = e.target.checked));
+      // Daily challenge / scenarios / career tiles close the setup with their mode.
+      box.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => close(b.dataset.mode)));
       draw();
     },
-  }).then(() => {
+  }).then((mode) => {
     rows.forEach((r, k) => (r.name = r.name.trim() || `Player ${k + 1}`));
+    if (mode !== true) return openSoloMode(mode, rows.find((r) => !r.cpu)?.name);
     startGame(newState({ players: rows, options: opts }), true);
   });
 }
 
 function startGame(state, fresh) {
   S = state;
+  rng = S.rng || null;
   pending = null;
   $("#speed").value = S.options.speed;
   if (fresh) {
-    S.turn = Math.floor(Math.random() * S.players.length);
+    S.turn = Math.floor(rand() * S.players.length);
     log(`New game! ${P(S.turn).name} goes first.`, null, true);
     for (const p of S.players.filter((p) => p.persona)) log(`${PERSONAS[p.persona].icon} ${p.name} is a ${PERSONAS[p.persona].label}: ${PERSONAS[p.persona].text}`, p);
   } else {
@@ -1758,7 +1800,7 @@ function init() {
   });
   $("#btn-end").addEventListener("click", async () => {
     const ok = await modal({ title: "End the game now?", html: "<p>The player with the highest net worth wins.</p>", buttons: [{ label: "Cancel", value: false }, { label: "End game", value: true, primary: true }] });
-    if (ok && !S.over) showWinner();
+    if (ok && !S.over) { S.endedEarly = true; showWinner(); }
   });
   $("#btn-rules").addEventListener("click", () => modal({ title: "How to play", html: $("#rules-tpl").innerHTML, buttons: [{ label: "Got it", value: true, primary: true }], wide: true }));
   document.addEventListener("keydown", (e) => {

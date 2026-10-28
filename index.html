@@ -55,6 +55,7 @@
               <option value="instant">Instant</option>
             </select>
           </label>
+          <button id="btn-career" class="ghost">🏅 Career</button>
           <button id="btn-rules" class="ghost">Rules</button>
           <button id="btn-end" class="ghost">End game</button>
           <button id="btn-new" class="ghost">New game</button>
@@ -83,6 +84,7 @@
 
     <script src="js/data.js"></script>
     <script src="js/game.js"></script>
+    <script src="js/solo.js"></script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
