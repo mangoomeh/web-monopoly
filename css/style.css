@@ -166,14 +166,15 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 .side-left .buildings, .side-right .buildings { flex-direction: column; }
 .house, .hotel {
   display: block;
-  width: 1.1cqw;
-  height: 1.1cqw;
+  width: 1.45cqw;
+  height: 1.45cqw;
   background: #1a9b3c;
-  border: 0.12cqw solid #0a4d1c;
-  border-radius: 0.15cqw;
+  border: 0.15cqw solid #0a4d1c;
+  border-radius: 0.2cqw;
+  box-shadow: 0 0 0 0.15cqw #fff;
 }
-.hotel { width: 2.2cqw; background: #d6242c; border-color: #6d0a0e; }
-.side-left .hotel, .side-right .hotel { width: 1.1cqw; height: 2.2cqw; }
+.hotel { width: 3cqw; background: #d6242c; border-color: #6d0a0e; }
+.side-left .hotel, .side-right .hotel { width: 1.45cqw; height: 3cqw; }
 
 .tname {
   padding: 0.35cqw 0.25cqw 0;
@@ -193,11 +194,27 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
   inset-inline: 0;
   block-size: 0.7cqw;
 }
+/* Owned tiles take a light wash of the owner's colour and show their token. */
+.tile.owned { background: color-mix(in srgb, var(--oc) 16%, var(--tile)); }
+.obadge {
+  display: inline-grid;
+  place-items: center;
+  width: 2.3cqw;
+  height: 2.3cqw;
+  font-size: 1.35cqw;
+  line-height: 1;
+  border-radius: 25%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 0.2cqw rgba(0, 0, 0, 0.25);
+  writing-mode: horizontal-tb;
+}
+.tile.mortgaged > :not(.tokens):not(.tprice) { filter: grayscale(1); opacity: 0.5; }
+.tile.mortgaged .obadge { filter: grayscale(1); opacity: 0.7; }
 .tile.mortgaged::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.12) 0 0.5cqw, transparent 0.5cqw 1.2cqw);
+  background: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.22) 0 0.4cqw, transparent 0.4cqw 1.1cqw);
   pointer-events: none;
 }
 
@@ -500,6 +517,7 @@ button.auto::after {
 .manage-row.mortgaged .mname { color: var(--muted); }
 .mname { display: flex; flex-direction: column; }
 .mname small { color: var(--muted); }
+.mname small.mhint { color: #a05a00; font-style: italic; }
 .swatch { width: 24px; height: 24px; border-radius: 5px; border: 1px solid rgba(0, 0, 0, 0.3); display: inline-grid; place-items: center; font-size: 12px; flex: none; }
 @media (max-width: 480px) {
   .manage-row { grid-template-columns: 26px 1fr; }
@@ -570,6 +588,11 @@ kbd { background: #eee; border: 1px solid #bbb; border-radius: 4px; padding: 0 4
   .side-top .tokens, .side-right .tokens { transform: none; }
   .side-top .tokens { inset: 0.7cqw 0 22% 0; }
   .tprice { font-size: 1.9cqw; padding-block-end: 1.2cqw; }
+  .obadge { width: 4.2cqw; height: 4.2cqw; font-size: 2.6cqw; }
+  .house { width: 1.6cqw; height: 1.6cqw; }
+  .hotel { width: 3.4cqw; height: 1.6cqw; }
+  .side-left .hotel, .side-right .hotel { width: 1.6cqw; height: 3.4cqw; }
+  .buildings { gap: 0.2cqw; }
   .ticon { font-size: 3.4cqw; }
   .brand { display: none; }
   #center { gap: 3cqw; padding: 3cqw; justify-content: center; }
@@ -607,8 +630,9 @@ kbd { background: #eee; border: 1px solid #bbb; border-radius: 4px; padding: 0 4
   .pmeta, .pprops { margin-left: 0; }
   .pmeta { font-size: 0.72em; }
   .chip { width: 16px; height: 16px; font-size: 9px; }
-  #toast { top: max(12px, env(safe-area-inset-top)); bottom: auto; transform: translate(-50%, -30px); }
-  #toast.show { transform: translate(-50%, 0); }
+  /* Pinned to the top edge of the control dock rather than over the board. */
+  #dock #toast { position: absolute; top: 0; bottom: auto; font-size: 0.85em; padding: 6px 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform: translate(-50%, -50%) scale(0.9); }
+  #dock #toast.show { transform: translate(-50%, -50%); }
 }
 
 @media (prefers-reduced-motion: reduce) {

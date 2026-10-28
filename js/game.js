@@ -139,16 +139,20 @@ function liquidValue(p) {
 
 // ---------------------------------------------------------------- building & mortgages
 
-function canBuild(p, i) {
+// Why p can't build on tile i right now, or "" if they can.
+function buildBlocker(p, i) {
   const b = BOARD[i], t = S.tiles[i];
-  if (b.type !== "property" || t.owner !== p.id || t.houses >= 5) return false;
-  if (!ownsSet(p.id, b.group)) return false;
+  if (b.type !== "property" || t.owner !== p.id) return "Not yours to build on";
+  if (t.houses >= 5) return "Fully built";
   const set = GROUP_TILES[b.group];
-  if (set.some((j) => S.tiles[j].mortgaged)) return false;
-  if (t.houses > Math.min(...set.map((j) => S.tiles[j].houses))) return false;
-  if (t.houses === 4 ? S.hotelsLeft < 1 : S.housesLeft < 1) return false;
-  return p.cash >= houseCost(b.group);
+  if (!ownsSet(p.id, b.group)) return `Need the full colour set (you have ${set.filter((j) => S.tiles[j].owner === p.id).length} of ${set.length})`;
+  if (set.some((j) => S.tiles[j].mortgaged)) return "Pay off this set's mortgages to build";
+  if (t.houses > Math.min(...set.map((j) => S.tiles[j].houses))) return "Build evenly: the rest of the set needs one first";
+  if (t.houses === 4 ? S.hotelsLeft < 1 : S.housesLeft < 1) return `The bank has run out of ${t.houses === 4 ? "hotels" : "houses"}`;
+  if (p.cash < houseCost(b.group)) return `Need ${fmt(houseCost(b.group))} to build`;
+  return "";
 }
+const canBuild = (p, i) => !buildBlocker(p, i);
 
 function build(p, i) {
   const t = S.tiles[i], cost = houseCost(BOARD[i].group);
@@ -1162,16 +1166,30 @@ function openManage(p) {
     return `<div class="manage-list">${mine.map((i) => {
       const b = BOARD[i], t = S.tiles[i];
       const color = b.group ? GROUPS[b.group].color : "#bbb";
-      const houses = t.houses === 5 ? "🏨" : "🏠".repeat(t.houses);
+      const houses = t.houses === 5 ? "🏨 " : "🏠".repeat(t.houses) + (t.houses ? " " : "");
+      // What it earns now, and what the next house would make it.
+      let status;
+      if (t.mortgaged) status = "Mortgaged · no rent";
+      else if (b.type === "utility") status = `Rent ${countType(p.id, "utility") === 2 ? 10 : 4}× the dice`;
+      else if (b.type === "station") status = `Rent ${fmt(rentFor(i, 0))}`;
+      else {
+        const next = ownsSet(p.id, b.group) && t.houses < 5 ? b.rents[t.houses + 1] * eventRentFactor(i) : null;
+        status = `${houses}Rent ${fmt(rentFor(i, 0))}${next !== null ? ` → ${fmt(next)} with ${t.houses === 4 ? "a hotel" : "another house"}` : ""}`;
+      }
+      const blocker = b.type === "property" && !t.mortgaged ? buildBlocker(p, i) : "";
+      const hint = t.mortgaged
+        ? (canUnmortgage(p, i) ? "" : `Need ${fmt(unmortgageCost(i))} to pay off the mortgage`)
+        : blocker === "Fully built" ? "" : blocker;
+      const mortgageNote = !t.mortgaged && !canMortgage(p, i) ? "Sell this set's houses before mortgaging" : "Mortgage for half its price";
       return `<div class="manage-row ${t.mortgaged ? "mortgaged" : ""}">
         <span class="swatch" style="background:${color}">${b.icon || ""}</span>
-        <span class="mname">${esc(b.name)}<small>${houses || (t.mortgaged ? "mortgaged" : "")}</small></span>
+        <span class="mname">${esc(b.name)}<small>${status}</small>${hint ? `<small class="mhint">${esc(hint)}</small>` : ""}</span>
         <span class="mbtns">${b.type === "property" ? `
-          <button data-act="build" data-i="${i}" ${canBuild(p, i) ? "" : "disabled"} title="Build (${fmt(houseCost(b.group))})">+🏠 ${fmt(houseCost(b.group))}</button>
-          <button data-act="sell" data-i="${i}" ${canSell(p, i) ? "" : "disabled"} title="Sell for half price">−🏠</button>` : ""}
+          <button data-act="build" data-i="${i}" ${canBuild(p, i) ? "" : "disabled"} title="${esc(blocker || `Build for ${fmt(houseCost(b.group))}`)}">+🏠 ${fmt(houseCost(b.group))}</button>
+          <button data-act="sell" data-i="${i}" ${canSell(p, i) ? "" : "disabled"} title="${t.houses ? (canSell(p, i) ? `Sell for ${fmt(GROUPS[b.group].houseCost / 2)}` : "Sell evenly: sell from the others first") : "No houses to sell"}">−🏠</button>` : ""}
         ${t.mortgaged
           ? `<button data-act="unmortgage" data-i="${i}" ${canUnmortgage(p, i) ? "" : "disabled"}>Unmortgage ${fmt(unmortgageCost(i))}</button>`
-          : `<button data-act="mortgage" data-i="${i}" ${canMortgage(p, i) ? "" : "disabled"}>Mortgage +${fmt(b.price / 2)}</button>`}</span>
+          : `<button data-act="mortgage" data-i="${i}" ${canMortgage(p, i) ? "" : "disabled"} title="${mortgageNote}">Mortgage +${fmt(b.price / 2)}</button>`}</span>
       </div>`;
     }).join("")}</div>
     <p class="small">Build evenly across a full colour set. Bank stock: ${S.housesLeft} houses, ${S.hotelsLeft} hotels.</p>`;
@@ -1354,8 +1372,14 @@ function renderTiles() {
     const i = +el.dataset.i, t = S.tiles[i];
     if (!isBuyable(i)) return;
     const strip = el.querySelector(".owner-strip");
-    strip.style.background = t.owner !== null ? P(t.owner).color : "transparent";
-    el.classList.toggle("owned", t.owner !== null);
+    const owner = t.owner !== null ? P(t.owner) : null;
+    strip.style.background = owner ? owner.color : "transparent";
+    el.classList.toggle("owned", !!owner);
+    if (owner) el.style.setProperty("--oc", owner.color);
+    // Owned tiles show the owner's token where the price was.
+    el.querySelector(".tprice").innerHTML = owner
+      ? `<span class="obadge" style="--c:${owner.color}" title="Owned by ${esc(owner.name)}${t.mortgaged ? " (mortgaged)" : ""}">${owner.token}</span>`
+      : fmt(BOARD[i].price);
     el.classList.toggle("mortgaged", t.mortgaged);
     const bld = el.querySelector(".buildings");
     if (bld) bld.innerHTML = t.houses === 5 ? '<i class="hotel"></i>' : '<i class="house"></i>'.repeat(t.houses);
@@ -1519,8 +1543,11 @@ function startGame(state, fresh) {
 const phoneLayout = window.matchMedia("(max-width: 860px)");
 function placeControls() {
   const controls = [$("#prompt"), $("#tools")];
-  if (phoneLayout.matches) $("#dock").append(...controls);
-  else controls.forEach((el) => $("#center").insertBefore(el, $("#pot")));
+  if (phoneLayout.matches) $("#dock").append(...controls, $("#toast"));
+  else {
+    controls.forEach((el) => $("#center").insertBefore(el, $("#pot")));
+    document.body.append($("#toast"));
+  }
 }
 
 function init() {
