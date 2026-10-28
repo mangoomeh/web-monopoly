@@ -72,6 +72,13 @@ run(`
     setup(4, { cpus: [false, true, true, true], own: { 0: ["Old Kent"], 1: ["Whitechapel"] } });
     P(1).level = "hard";
     return !cpuAccepts(P(1), P(0), [tile("Whitechapel")], [], 250);`));
+  await check("Hard CPUs at a table with a person mind the person most, and each other less", () => ok(`
+    setup(4, { cpus: [false, true, true, true] });
+    S.players.forEach((p) => (p.level = "hard"));
+    const vsPerson = rivalWeight(P(1), P(0)), vsCpu = rivalWeight(P(1), P(2));
+    setup(4);
+    S.players.forEach((p) => (p.level = "hard"));
+    return vsPerson > rivalWeight(P(1), P(0)) && vsCpu < rivalWeight(P(1), P(2));`));
   await check("a counter-offer is a deal the CPU then accepts", () => ok(`
     setup(2, { cash: [1500, 1500], own: { 0: ["Bow", "Marlborough", "Strand"], 1: ["Vine"] }, cpus: [false, true] });
     const c = cpuCounterOffer(P(1), P(0), [], [tile("Vine")], 100);

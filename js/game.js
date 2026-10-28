@@ -899,10 +899,11 @@ function wireChart(box) {
 // when a deal completes a colour set for them; easy CPUs never start trades. Hard CPUs (`smart`) size
 // their cash reserve to the rent they could land on, price property by what it
 // does for their position and for rivals', and build where rent pays back best.
+// `focus` CPUs at a table with people play to beat the people (see rivalWeight).
 const CPU_LEVELS = {
   easy: { label: "Easy", rivals: 0.35, setCaution: 1, reserve: 2, bid: 0.75, accept: 0, noProposals: true },
   normal: { label: "Normal", rivals: 1, setCaution: 1.15, reserve: 1, bid: 1, accept: 25 },
-  hard: { label: "Hard", rivals: 1.15, setCaution: 1.3, reserve: 1, bid: 1, accept: 40, smart: true },
+  hard: { label: "Hard", rivals: 1.15, setCaution: 1.3, reserve: 1, bid: 1, accept: 40, smart: true, focus: true },
 };
 const level = (p) => CPU_LEVELS[p.level] || CPU_LEVELS.normal;
 
@@ -1116,11 +1117,18 @@ function positionValue(pid, owners, cash, view = PERSONA_DEFAULTS) {
   return v;
 }
 
+function isPerson(q) {
+  return !q.cpu;
+}
+
 // How much CPU `p` minds `other` gaining: fully in a duel, less with several
 // rivals (helping one of them still leaves the rest behind), more if `other` leads.
+// A `focus` CPU at a table with people minds a person gaining as if it were a
+// duel, and minds the other CPUs less, so they deal with each other more freely.
 function rivalWeight(p, other) {
   const rivals = alive().filter((q) => q !== p);
-  const w = rivals.length <= 1 ? 1 : netWorth(other) >= Math.max(...rivals.map(netWorth)) ? 0.85 : 0.6;
+  let w = rivals.length <= 1 ? 1 : netWorth(other) >= Math.max(...rivals.map(netWorth)) ? 0.85 : 0.6;
+  if (level(p).focus && !isPerson(p) && rivals.some(isPerson)) w = isPerson(other) ? 1 : w * 0.6;
   return w * level(p).rivals * persona(p).rivals;
 }
 

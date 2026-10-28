@@ -11,7 +11,7 @@ A complete, browser-based take on the classic property-trading board game (Londo
 - Full rules: buying, rent (colour-set doubling, stations, utilities), houses & hotels with even building and a limited bank supply, mortgages (10% interest), Chance & Community Chest decks, Jail (doubles / £50 fine / Get Out of Jail Free cards, three-doubles rule), Income & Super Tax, bankruptcy
 - Auctions for unbought property (optional)
 - Trading property, Get Out of Jail Free cards and cash between players; CPUs judge deals by what each side gains (they won't hand you a colour set cheaply) and propose their own
-- CPU difficulty per opponent: Easy, Normal or Hard (Hard sizes its cash reserve to the rent ahead, mortgages spare property to build, and prices property by what it does for rivals too)
+- CPU difficulty per opponent: Easy, Normal or Hard (Hard sizes its cash reserve to the rent ahead, mortgages spare property to build, and prices property by what it does for rivals too; at a table with people, Hard CPUs treat the people as their main rival and deal more freely with each other)
 - When a CPU turns down your trade it makes a counter-offer you can agree to or tweak
 - CPU personalities (optional): each CPU is randomly a Steady player, Collector, Developer, Hoarder, Dealmaker or Gambler
 - Round events (optional): a surprise every round, such as a building boom, rent strike, heatwave, tax holiday, market crash, charity drive or roadworks
