@@ -882,11 +882,14 @@ function rivalWeight(p, other) {
 function cpuTradeScore(p, other, give, get, cashToP) {
   const before = S.tiles.map((t) => t.owner);
   const after = before.slice();
-  for (const i of give) after[i] = other.id;
-  for (const i of get) after[i] = p.id;
+  for (const i of give) if (!isCard(i)) after[i] = other.id;
+  for (const i of get) if (!isCard(i)) after[i] = p.id;
+  // A Get Out of Jail Free card saves the £50 fine; once the board is built up
+  // staying in Jail is often better, so it's worth less.
+  const cards = (get.filter(isCard).length - give.filter(isCard).length) * (unownedCount() > 8 ? 50 : 20);
   const view = persona(p);
-  const mine = positionValue(p.id, after, p.cash + cashToP, view) - positionValue(p.id, before, p.cash, view);
-  const theirs = positionValue(other.id, after, other.cash - cashToP, view) - positionValue(other.id, before, other.cash, view);
+  const mine = positionValue(p.id, after, p.cash + cashToP, view) - positionValue(p.id, before, p.cash, view) + cards;
+  const theirs = positionValue(other.id, after, other.cash - cashToP, view) - positionValue(other.id, before, other.cash, view) - cards;
   return { mine, theirs, score: mine - rivalWeight(p, other) * theirs };
 }
 
@@ -912,7 +915,7 @@ function cheapestCash(lo, hi, ok) {
 function cpuCounterOffer(cpu, human, give, get, cash) {
   const lo = -Math.max(0, Math.floor((cpu.cash - 50) / 10) * 10), hi = Math.floor(human.cash / 10) * 10;
   const options = [{ give, get }];
-  for (const j of tradeable(human)) if (!give.includes(j)) options.push({ give: [...give, j], get });
+  for (const j of tradeItems(human)) if (!give.includes(j)) options.push({ give: [...give, j], get });
   if (get.length > 1) for (const j of get) options.push({ give, get: get.filter((k) => k !== j) });
   let best = null;
   for (const o of options) {
@@ -954,6 +957,7 @@ async function cpuTryTrade(p) {
         const ours = GROUP_TILES[g].filter((j) => S.tiles[j].owner === p.id);
         if (ours.length > 1 && ours.every((j) => myTiles.includes(j)) && GROUP_TILES[g].every((j) => ours.includes(j) || S.tiles[j].owner === other.id)) gives.push(ours);
       }
+      for (const d of p.jailCards) gives.push([`jail:${d}`]);
       const accept = other.cpu
         ? (give, c) => cpuAccepts(other, p, get, give, c)
         // For a human, offer what our own judgement would call a fair deal for them.
@@ -970,7 +974,7 @@ async function cpuTryTrade(p) {
   if (!best) return;
   const { other, give, get, cash } = best;
   S.tradeAsked[best.k] = S.round + Math.ceil((other.cpu ? 2 : 6) * persona(p).patience);
-  const side = (tiles, money) => [...tiles.map((j) => BOARD[j].name), money > 0 ? fmt(money) : ""].filter(Boolean).join(" + ") || "nothing";
+  const side = (items, money) => [...items.map(itemName), money > 0 ? fmt(money) : ""].filter(Boolean).join(" + ") || "nothing";
   if (!other.cpu) {
     const accepted = await modal({
       title: `🤝 Offer from ${p.token} ${esc(p.name)}`,
@@ -986,8 +990,8 @@ async function cpuTryTrade(p) {
   if (other.cpu) {
     await announce(`🤝 ${p.token} <b>${esc(p.name)}</b> offers ${other.token} <b>${esc(other.name)}</b> ${esc(side(give, cash))} for ${esc(side(get, -cash))}…`, 2200);
   }
-  for (const j of get) S.tiles[j].owner = p.id;
-  for (const j of give) S.tiles[j].owner = other.id;
+  transferItems(get, other, p);
+  transferItems(give, p, other);
   p.cash -= cash;
   other.cash += cash;
   log(`🤝 ${p.name} traded with ${other.name}: gave ${side(give, cash)}, got ${side(get, -cash)}.`, p, true);
@@ -1155,16 +1159,34 @@ function tradeable(p) {
   return ownedBy(p).filter((i) => !(BOARD[i].group && groupHasBuildings(BOARD[i].group)));
 }
 
+// Trade items are tile indices, or "jail:chance" / "jail:chest" for a Get Out of Jail Free card.
+const isCard = (x) => typeof x === "string";
+const tradeItems = (p) => [...tradeable(p), ...p.jailCards.map((d) => `jail:${d}`)];
+const parseItem = (v) => (v.startsWith("jail:") ? v : +v);
+const itemName = (x) => (isCard(x) ? `Get Out of Jail Free card` : BOARD[x].name);
+
+function transferItems(items, from, to) {
+  for (const x of items) {
+    if (!isCard(x)) { S.tiles[x].owner = to.id; continue; }
+    const deck = x.slice(5);
+    from.jailCards.splice(from.jailCards.indexOf(deck), 1);
+    to.jailCards.push(deck);
+  }
+}
+
 function openTrade(p) {
   const others = alive().filter((o) => o !== p);
   if (!others.length) return;
   let other = others[0];
   const propList = (owner, side) => {
-    const list = tradeable(owner);
-    if (!list.length) return '<p class="small">No tradeable property.</p>';
-    return list.map((i) => `<label class="trade-prop"><input type="checkbox" data-side="${side}" value="${i}">
-      <span class="swatch" style="background:${BOARD[i].group ? GROUPS[BOARD[i].group].color : "#bbb"}">${BOARD[i].icon || ""}</span>
-      ${esc(BOARD[i].name)}${S.tiles[i].mortgaged ? " <small>(mortgaged)</small>" : ""}</label>`).join("");
+    const list = tradeItems(owner);
+    if (!list.length) return '<p class="small">Nothing to trade.</p>';
+    return list.map((i) => isCard(i)
+      ? `<label class="trade-prop"><input type="checkbox" data-side="${side}" value="${i}">
+        <span class="swatch" style="background:#f3e3a6">🎫</span> Get Out of Jail Free</label>`
+      : `<label class="trade-prop"><input type="checkbox" data-side="${side}" value="${i}">
+        <span class="swatch" style="background:${BOARD[i].group ? GROUPS[BOARD[i].group].color : "#bbb"}">${BOARD[i].icon || ""}</span>
+        ${esc(BOARD[i].name)}${S.tiles[i].mortgaged ? " <small>(mortgaged)</small>" : ""}</label>`).join("");
   };
   modal({
     title: "🤝 Propose a trade",
@@ -1189,8 +1211,8 @@ function openTrade(p) {
       fill();
       proposeTrade = async () => {
         const msg = box.querySelector("#trade-msg");
-        const give = [...box.querySelectorAll('input[data-side="give"]:checked')].map((x) => +x.value);
-        const get = [...box.querySelectorAll('input[data-side="get"]:checked')].map((x) => +x.value);
+        const give = [...box.querySelectorAll('input[data-side="give"]:checked')].map((x) => parseItem(x.value));
+        const get = [...box.querySelectorAll('input[data-side="get"]:checked')].map((x) => parseItem(x.value));
         const cashGive = Math.max(0, Math.floor(+box.querySelector("#cash-give").value || 0));
         const cashGet = Math.max(0, Math.floor(+box.querySelector("#cash-get").value || 0));
         if (!give.length && !get.length && !cashGive && !cashGet) return (msg.textContent = "Add something to the trade.");
@@ -1203,10 +1225,10 @@ function openTrade(p) {
             const c = cpuCounterOffer(other, p, give, get, cashGive - cashGet);
             if (!c) return (msg.textContent = `${other.name} declines, and can't see a deal to be made here.`);
             // Put the counter-offer in the form so it can be agreed to or tweaked.
-            box.querySelectorAll("input[data-side]").forEach((x) => (x.checked = (x.dataset.side === "give" ? c.give : c.get).includes(+x.value)));
+            box.querySelectorAll("input[data-side]").forEach((x) => (x.checked = (x.dataset.side === "give" ? c.give : c.get).includes(parseItem(x.value))));
             box.querySelector("#cash-give").value = Math.max(0, c.cash);
             box.querySelector("#cash-get").value = Math.max(0, -c.cash);
-            const side = (tiles, money) => [...tiles.map((j) => esc(BOARD[j].name)), money > 0 ? fmt(money) : ""].filter(Boolean).join(" + ") || "nothing";
+            const side = (items, money) => [...items.map((j) => esc(itemName(j))), money > 0 ? fmt(money) : ""].filter(Boolean).join(" + ") || "nothing";
             msg.innerHTML = `${esc(other.name)} declines, but counters: you give <b>${side(c.give, c.cash)}</b>, you get <b>${side(c.get, -c.cash)}</b>.
               <button class="primary counter-yes">Agree</button> <span class="small">or change it and propose again.</span>`;
             msg.querySelector(".counter-yes").addEventListener("click", () => proposeTrade());
@@ -1222,11 +1244,11 @@ function openTrade(p) {
           }));
           if (!accepted) { msg.textContent = `${other.name} declined.`; close(false); return; }
         }
-        for (const i of give) S.tiles[i].owner = other.id;
-        for (const i of get) S.tiles[i].owner = p.id;
+        transferItems(give, p, other);
+        transferItems(get, other, p);
         p.cash += cashGet - cashGive;
         other.cash += cashGive - cashGet;
-        const names = (l) => l.map((i) => BOARD[i].name).concat([]).join(", ");
+        const names = (l) => l.map(itemName).join(", ");
         log(`🤝 ${p.name} traded with ${other.name}: gave ${[names(give), cashGive ? fmt(cashGive) : ""].filter(Boolean).join(" + ") || "nothing"}, got ${[names(get), cashGet ? fmt(cashGet) : ""].filter(Boolean).join(" + ") || "nothing"}.`, p);
         toast("Trade completed!");
         close(true);
