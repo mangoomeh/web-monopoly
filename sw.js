@@ -1,5 +1,5 @@
 // Offline support: precache the app shell, then serve from cache and refresh in the background.
-const CACHE = "web-monopoly-v8";
+const CACHE = "web-monopoly-v9";
 const SHELL = [
   "./",
   "index.html",

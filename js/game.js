@@ -332,6 +332,10 @@ async function rollDice() {
 async function gameLoop() {
   while (!S.over) {
     if (alive().length <= 1) return showWinner();
+    if (S.round === 5 && !S.hinted) {
+      S.hinted = true;
+      log("🎩 Rumour has it the dice are ticklish… try a few quick taps.");
+    }
     if (S.options.events && S.eventRound !== S.round) {
       await startRoundEvent();
       if (alive().length <= 1) return showWinner();
