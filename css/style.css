@@ -283,6 +283,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 }
 
 #dice { display: flex; gap: 1.6cqw; }
+
+.brand.spin { animation: brand-spin 1s ease-in-out; }
+@keyframes brand-spin { to { transform: rotate(352deg) scale(1.1); } }
+.money-rain { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 60; }
+.money-rain span { position: absolute; top: -50px; animation: money-fall linear forwards; }
+@keyframes money-fall { to { transform: translateY(110vh) rotate(540deg); } }
 .die {
   width: 6.2cqw;
   height: 6.2cqw;

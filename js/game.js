@@ -1053,6 +1053,48 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
 }
 
+// Easter egg: tap the logo or the dice five times quickly, or type the Konami
+// code, and it rains money. Purely for show; the game state is never touched.
+const PENNYBAGS = [
+  "Rich Uncle Pennybags approves. 🎩",
+  "Bank error in your favour. (Not really.)",
+  "Do not pass GO. Do collect confetti.",
+  "Made with ❤️ since GA SEI-33.",
+];
+function moneyRain() {
+  toast(PENNYBAGS[Math.floor(Math.random() * PENNYBAGS.length)]);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || document.querySelector(".money-rain")) return;
+  const rain = document.createElement("div");
+  rain.className = "money-rain";
+  rain.setAttribute("aria-hidden", "true");
+  for (let k = 0; k < 40; k++) {
+    const s = document.createElement("span");
+    s.textContent = ["💷", "💵", "💰", "🎩", "🪙"][k % 5];
+    s.style.cssText = `left:${Math.random() * 100}%;animation-delay:${Math.random() * 1.2}s;animation-duration:${2 + Math.random() * 1.5}s;font-size:${18 + Math.random() * 22}px`;
+    rain.append(s);
+  }
+  document.body.append(rain);
+  $(".brand").classList.add("spin");
+  setTimeout(() => { rain.remove(); $(".brand").classList.remove("spin"); }, 4000);
+}
+
+function setupEasterEgg() {
+  let taps = [];
+  const tap = () => {
+    const now = Date.now();
+    taps = taps.filter((t) => now - t < 1500).concat(now);
+    if (taps.length >= 5) { taps = []; moneyRain(); }
+  };
+  $(".brand").addEventListener("click", tap);
+  $("#dice").addEventListener("click", tap);
+  const code = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+  let at = 0;
+  document.addEventListener("keydown", (e) => {
+    at = e.key === code[at] ? at + 1 : e.key === code[0] ? 1 : 0;
+    if (at === code.length) { at = 0; moneyRain(); }
+  });
+}
+
 // Generic modal. Resolves with the clicked button's value.
 let modalState = null;
 function modal({ title, html, buttons = [], onMount, wide }) {
@@ -1479,6 +1521,7 @@ function placeControls() {
 
 function init() {
   buildBoard();
+  setupEasterEgg();
   placeControls();
   phoneLayout.addEventListener("change", placeControls);
   $("#prompt").addEventListener("click", (e) => {
